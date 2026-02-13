@@ -10,4 +10,4 @@ For example, given that we can make a Python binding of the sglang-d router:
 1. pip install sglang-d-router (we can start with local right now. Like first clone xxx repo, then install local binding)
 2. pip install "sglang[diffusion]"
 3. launching command (how to use sglang-d-router to launch n sglang diffusion servers)
-4. Sending demenstrative requests
+4. Sending demonstrative requests
