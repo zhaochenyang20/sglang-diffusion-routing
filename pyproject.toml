@@ -5,36 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sglang-d-router"
 version = "0.0.1"
-description = "A demonstrative diffusion DP router for SGLang (ported from radixark/miles#544)."
+description = "SGLang Diffusion Router (ported from radixark/miles#544)."
 readme = "README.md"
 requires-python = ">=3.10"
-
 dependencies = [
-    "fastapi>=0.110",
-    "uvicorn>=0.23",
-    "httpx>=0.25",
-    "pydantic>=2",
-    "requests>=2",
+  "fastapi>=0.110",
+  "uvicorn>=0.23",
+  "httpx>=0.25",
+  "pydantic>=2",
+  "requests>=2",
 ]
 
 [project.optional-dependencies]
-# pytest 
 dev = [
-    "pytest>=8",
-    "pytest-asyncio>=0.23",
-    "anyio>=4",
+  "pytest>=8",
 ]
 
+[project.scripts]
+sglang-d-router-demo = "sglang_d_router.cli.demo:main"
+
 [tool.setuptools]
-package-dir = { "" = "src" }
+package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-markers = [
-    "unit: fast unit tests (no servers)",
-    "integration: integration/E2E tests (start servers)",
-]
-asyncio_mode = "auto"
