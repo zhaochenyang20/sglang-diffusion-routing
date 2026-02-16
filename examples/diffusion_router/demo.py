@@ -24,7 +24,8 @@ import argparse
 
 import uvicorn
 
-from miles.router.diffusion_router import DiffusionRouter
+# CHANGED: import path from miles -> this repo package
+from sglang_d_router.router.diffusion_router import DiffusionRouter
 
 
 def main():
