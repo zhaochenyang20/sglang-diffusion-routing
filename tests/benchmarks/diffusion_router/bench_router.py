@@ -4,10 +4,10 @@ Launch diffusion workers and router, then run a serving benchmark.
 
 Example:
   python tests/benchmarks/diffusion_router/bench_router.py \
-    --model Wan-AI/Wan2.2-T2V-A14B-Diffusers \
+    --model Qwen/Qwen-Image \
     --num-workers 2 \
     --num-prompts 20 \
-    --max-concurrency 4
+    --max-concurrency 2
 """
 
 from __future__ import annotations
@@ -201,19 +201,15 @@ def _build_bench_command(args: argparse.Namespace, base_url: str) -> list[str]:
     cmd = [
         sys.executable,
         "-m",
-        "sglang.bench_serving",
-        "--backend",
-        "sglang",
+        "sglang.multimodal_gen.benchmarks.bench_serving",
         "--base-url",
         base_url,
         "--model",
         args.model,
-        "--dataset-name",
+        "--dataset",
         args.dataset,
         "--num-prompts",
         str(args.num_prompts),
-        "--max-concurrency",
-        str(args.max_concurrency),
         "--request-rate",
         str(args.request_rate),
         "--log-level",
@@ -222,6 +218,8 @@ def _build_bench_command(args: argparse.Namespace, base_url: str) -> list[str]:
 
     if args.dataset_path:
         cmd += ["--dataset-path", args.dataset_path]
+    if args.max_concurrency:
+        cmd += ["--max-concurrency", str(args.max_concurrency)]
     if args.task:
         cmd += ["--task", args.task]
     if args.width:

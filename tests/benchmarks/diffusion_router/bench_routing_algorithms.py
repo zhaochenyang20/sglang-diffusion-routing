@@ -5,7 +5,7 @@ collecting results in JSON and CSV outputs.
 
 Example:
   python tests/benchmarks/diffusion_router/bench_routing_algorithms.py \
-    --model Wan-AI/Wan2.2-T2V-A14B-Diffusers \
+    --model Qwen/Qwen-Image \
     --num-workers 2 \
     --num-prompts 10 \
     --max-concurrency 2
