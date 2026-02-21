@@ -16,84 +16,75 @@ It provides worker registration, load balancing, health checking, and request pr
 From repository root:
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-pip install .
-```
-
-Development install:
-
-```bash
-pip install -e .
-```
-
-Run tests:
-
-```bash
-pip install pytest
-pytest tests/unit -v
+# Create a virtual environment
+# python3 -m venv .venv
+# source .venv/bin/activate
+# pip install uv
+git clone https://github.com/sglang/sglang-diffusion-routing.git
+cd sglang-diffusion-routing
+uv pip install .
 ```
 
 Workers require SGLang diffusion support:
 
 ```bash
-pip install "sglang[diffusion]"
+uv pip install "sglang[diffusion]" --prerelease=allow
 ```
 
 ## Quick Start
 
-### 1) Start diffusion workers
+### Start diffusion workers
 
 ```bash
 # worker 1
-CUDA_VISIBLE_DEVICES=0 sglang serve \
+SGLANG_USE_MODELSCOPE=TRUE CUDA_VISIBLE_DEVICES=0 sglang serve \
     --model-path stabilityai/stable-diffusion-3-medium-diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30000
 
 # worker 2
-CUDA_VISIBLE_DEVICES=1 sglang serve \
+SGLANG_USE_MODELSCOPE=TRUE CUDA_VISIBLE_DEVICES=1 sglang serve \
     --model-path stabilityai/stable-diffusion-3-medium-diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30001
 ```
 
-### 2) Start the router
+### Start the router
 
-Script entry:
+1. Script entry
 
 ```bash
-sglang-d-router --port 30080 \
+sglang-d-router --port 30081 \
     --worker-urls http://localhost:30000 http://localhost:30001
 ```
 
-Module entry:
+2. Module entry
 
 ```bash
-python -m sglang_diffusion_routing --port 30080 \
+python -m sglang_diffusion_routing --port 30081 \
     --worker-urls http://localhost:30000 http://localhost:30001
 ```
 
-Or start empty and add workers later:
+3. Or start empty and add workers later:
 
 ```bash
-sglang-d-router --port 30080
-curl -X POST "http://localhost:30080/add_worker?url=http://localhost:30000"
+sglang-d-router --port 30081
+curl -X POST "http://localhost:30081/add_worker?url=http://localhost:30000"
 ```
 
-### 3) Test the router
+### Test the router
 
 ```bash
 # Check router health
-curl http://localhost:30080/health
+curl http://localhost:30081/health
 
 # List registered workers
-curl http://localhost:30080/list_workers
+curl http://localhost:30081/list_workers
 
 # Image generation request (SD3)
-curl -X POST http://localhost:30080/generate \
+curl -X POST http://localhost:30081/generate \
     -H "Content-Type: application/json" \
     -d '{
         "model": "stabilityai/stable-diffusion-3-medium-diffusers",
@@ -102,7 +93,7 @@ curl -X POST http://localhost:30080/generate \
     }'
 
 # Video generation request
-curl -X POST http://localhost:30080/generate_video \
+curl -X POST http://localhost:30081/generate_video \
     -H "Content-Type: application/json" \
     -d '{
         "model": "stabilityai/stable-video-diffusion",
@@ -110,7 +101,7 @@ curl -X POST http://localhost:30080/generate_video \
     }'
 
 # Check per-worker health and load
-curl http://localhost:30080/health_workers
+curl http://localhost:30081/health_workers
 ```
 
 ## Router API
@@ -135,7 +126,7 @@ Full details: [docs/update_weights_from_disk.md](docs/update_weights_from_disk.m
 Example:
 
 ```bash
-curl -X POST http://localhost:30080/update_weights_from_disk \
+curl -X POST http://localhost:30081/update_weights_from_disk \
     -H "Content-Type: application/json" \
     -d '{"model_path": "/path/to/new/weights"}'
 ```
@@ -164,8 +155,8 @@ They are not part of default unit test collection (`pytest tests/unit -v`).
 Single benchmark:
 
 ```bash
-python tests/benchmarks/diffusion_router/bench_router.py \
-    --model Wan-AI/Wan2.2-T2V-A14B-Diffusers \
+SGLANG_USE_MODELSCOPE=TRUE python tests/benchmarks/diffusion_router/bench_router.py \
+    --model stabilityai/stable-diffusion-3-medium-diffusers \
     --num-workers 2 \
     --num-prompts 20 \
     --max-concurrency 4
@@ -174,8 +165,8 @@ python tests/benchmarks/diffusion_router/bench_router.py \
 Algorithm comparison:
 
 ```bash
-python tests/benchmarks/diffusion_router/bench_routing_algorithms.py \
-    --model Wan-AI/Wan2.2-T2V-A14B-Diffusers \
+SGLANG_USE_MODELSCOPE=TRUE python tests/benchmarks/diffusion_router/bench_routing_algorithms.py \
+    --model stabilityai/stable-diffusion-3-medium-diffusers \
     --num-workers 2 \
     --num-prompts 20 \
     --max-concurrency 4
