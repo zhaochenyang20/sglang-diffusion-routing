@@ -36,15 +36,18 @@ uv pip install "sglang[diffusion]" --prerelease=allow
 ### Start diffusion workers
 
 ```bash
+# If connect to HuggingFace is not allowed
+# You can set the environment variable SGLANG_USE_MODELSCOPE=TRUE
+
 # worker 1
-SGLANG_USE_MODELSCOPE=TRUE CUDA_VISIBLE_DEVICES=0 sglang serve \
+CUDA_VISIBLE_DEVICES=0 sglang serve \
     --model-path Qwen/Qwen-Image \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30000
 
 # worker 2
-SGLANG_USE_MODELSCOPE=TRUE CUDA_VISIBLE_DEVICES=1 sglang serve \
+CUDA_VISIBLE_DEVICES=1 sglang serve \
     --model-path Qwen/Qwen-Image \
     --num-gpus 1 \
     --host 127.0.0.1 \
