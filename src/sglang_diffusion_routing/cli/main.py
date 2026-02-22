@@ -26,9 +26,16 @@ def _run_router_server(
         worker_urls if worker_urls is not None else args.worker_urls or []
     )
     router = DiffusionRouter(args, verbose=args.verbose)
+    refresh_tasks = []
     for url in worker_urls:
         router.register_worker(url)
-        asyncio.run(router._refresh_worker_video_support(url))
+        refresh_tasks.append(router._refresh_worker_video_support(url))
+
+    if refresh_tasks:
+        async def _refresh_all_worker_video_support() -> None:
+            await asyncio.gather(*refresh_tasks)
+
+        asyncio.run(_refresh_all_worker_video_support())
 
     print(f"{log_prefix} starting router on {args.host}:{args.port}", flush=True)
     print(

@@ -271,7 +271,7 @@ class DiffusionRouter:
                     else None
                 )
                 if isinstance(task_type, str):
-                    return task_type.upper() not in self._IMAGE_TASK_TYPES
+                    return task_type.upper() not in _IMAGE_TASK_TYPES
         except Exception:
             return None
 
