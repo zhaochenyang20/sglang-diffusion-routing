@@ -1,4 +1,0 @@
-algorithm,throughput_qps,latency_mean,latency_median,latency_p99,duration,completed_requests,failed_requests,throughput_qps_delta_pct,latency_mean_delta_pct,latency_median_delta_pct,latency_p99_delta_pct,error
-least-request,,,,,,,,,,,,exit_code=2
-round-robin,,,,,,,,,,,,exit_code=2
-random,,,,,,,,,,,,exit_code=2

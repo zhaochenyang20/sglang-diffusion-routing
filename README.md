@@ -38,14 +38,14 @@ uv pip install "sglang[diffusion]" --prerelease=allow
 ```bash
 # worker 1
 SGLANG_USE_MODELSCOPE=TRUE CUDA_VISIBLE_DEVICES=0 sglang serve \
-    --model-path stabilityai/stable-diffusion-3-medium-diffusers \
+    --model-path Qwen/Qwen-Image \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30000
 
 # worker 2
 SGLANG_USE_MODELSCOPE=TRUE CUDA_VISIBLE_DEVICES=1 sglang serve \
-    --model-path stabilityai/stable-diffusion-3-medium-diffusers \
+    --model-path Qwen/Qwen-Image \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30001
@@ -83,20 +83,38 @@ curl http://localhost:30081/health
 # List registered workers
 curl http://localhost:30081/list_workers
 
-# Image generation request (SD3)
+# Image generation request (returns base64-encoded image)
 curl -X POST http://localhost:30081/generate \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "stabilityai/stable-diffusion-3-medium-diffusers",
+        "model": "Qwen/Qwen-Image",
         "prompt": "a cute cat",
-        "num_images": 1
+        "num_images": 1,
+        "response_format": "b64_json"
     }'
+
+# Decode and save the image locally
+curl -s -X POST http://localhost:30081/generate \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "Qwen/Qwen-Image",
+        "prompt": "a cute cat",
+        "num_images": 1,
+        "response_format": "b64_json"
+    }' | python3 -c "
+import sys, json, base64
+resp = json.load(sys.stdin)
+img = base64.b64decode(resp['data'][0]['b64_json'])
+with open('output.png', 'wb') as f:
+    f.write(img)
+print('Saved to output.png')
+"
 
 # Video generation request
 curl -X POST http://localhost:30081/generate_video \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "stabilityai/stable-video-diffusion",
+        "model": "Qwen/Qwen-Image",
         "prompt": "a flowing river"
     }'
 
@@ -156,7 +174,7 @@ Single benchmark:
 
 ```bash
 SGLANG_USE_MODELSCOPE=TRUE python tests/benchmarks/diffusion_router/bench_router.py \
-    --model stabilityai/stable-diffusion-3-medium-diffusers \
+    --model Qwen/Qwen-Image \
     --num-workers 2 \
     --num-prompts 20 \
     --max-concurrency 4
@@ -166,7 +184,7 @@ Algorithm comparison:
 
 ```bash
 SGLANG_USE_MODELSCOPE=TRUE python tests/benchmarks/diffusion_router/bench_routing_algorithms.py \
-    --model stabilityai/stable-diffusion-3-medium-diffusers \
+    --model Qwen/Qwen-Image \
     --num-workers 2 \
     --num-prompts 20 \
     --max-concurrency 4
