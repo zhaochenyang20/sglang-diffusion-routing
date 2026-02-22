@@ -51,7 +51,7 @@ CUDA_VISIBLE_DEVICES=1 sglang serve \
     --model-path Qwen/Qwen-Image \
     --num-gpus 1 \
     --host 127.0.0.1 \
-    --port 30001
+    --port 30002
 ```
 
 ### Start the router
@@ -60,14 +60,14 @@ CUDA_VISIBLE_DEVICES=1 sglang serve \
 
 ```bash
 sglang-d-router --port 30081 \
-    --worker-urls http://localhost:30000 http://localhost:30001
+    --worker-urls http://localhost:30000 http://localhost:30002
 ```
 
 2. Module entry
 
 ```bash
 python -m sglang_diffusion_routing --port 30081 \
-    --worker-urls http://localhost:30000 http://localhost:30001
+    --worker-urls http://localhost:30000 http://localhost:30002
 ```
 
 3. Or start empty and add workers later:
@@ -75,6 +75,7 @@ python -m sglang_diffusion_routing --port 30081 \
 ```bash
 sglang-d-router --port 30081
 curl -X POST "http://localhost:30081/add_worker?url=http://localhost:30000"
+curl -X POST "http://localhost:30081/add_worker?url=http://localhost:30002"
 ```
 
 ### Test the router
@@ -123,6 +124,50 @@ curl -X POST http://localhost:30081/generate_video \
 
 # Check per-worker health and load
 curl http://localhost:30081/health_workers
+```
+
+### Python requests examples
+
+```python
+import requests
+import base64
+
+ROUTER = "http://localhost:30081"
+
+# Check router health
+resp = requests.get(f"{ROUTER}/health")
+print(resp.json())
+
+# List registered workers
+resp = requests.get(f"{ROUTER}/list_workers")
+print(resp.json())
+
+# Image generation request (returns base64-encoded image)
+resp = requests.post(f"{ROUTER}/generate", json={
+    "model": "Qwen/Qwen-Image",
+    "prompt": "a cute cat",
+    "num_images": 1,
+    "response_format": "b64_json",
+})
+data = resp.json()
+print(data)
+
+# Decode and save the image locally
+img = base64.b64decode(data["data"][0]["b64_json"])
+with open("output.png", "wb") as f:
+    f.write(img)
+print("Saved to output.png")
+
+# Video generation request
+resp = requests.post(f"{ROUTER}/generate_video", json={
+    "model": "Qwen/Qwen-Image",
+    "prompt": "a flowing river",
+})
+print(resp.json())
+
+# Check per-worker health and load
+resp = requests.get(f"{ROUTER}/health_workers")
+print(resp.json())
 ```
 
 ## Router API
