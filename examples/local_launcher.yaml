@@ -1,5 +1,4 @@
 launcher:
-  backend: local
   model: Qwen/Qwen-Image
 
   num_workers: 8
