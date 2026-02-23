@@ -25,7 +25,7 @@ def _run_router_server(
         ) from exc
 
     worker_urls = list(
-        worker_urls if worker_urls is not None else args.worker_urls or []
+        args.worker_urls or []
     )
     refresh_tasks = []
     for url in worker_urls:
