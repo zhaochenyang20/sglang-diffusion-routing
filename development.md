@@ -6,7 +6,7 @@
 pip install -e .
 ```
 
-Run tests:
+Run CPU only tests:
 
 ```bash
 pip install pytest
