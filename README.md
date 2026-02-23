@@ -1,15 +1,19 @@
-# sglang-diffusion-routing
+# SGLang Diffusion Router
 
-A lightweight router for SGLang diffusion workers.
+A lightweight router for SGLang diffusion workers used in RL systems.
 
-It provides worker registration, load balancing, health checking, and request proxying for diffusion generation APIs.
+It provides worker registration, load balancing, health checking, refit weights and request proxying for diffusion generation APIs.
 
-## Highlights
+## API Reference
 
-- `least-request` routing by default, with `round-robin` and `random`.
-- Background health checks with quarantine after repeated failures.
-- Router APIs for worker registration, health inspection, and proxy forwarding.
-- `update_weights_from_disk` broadcast to all healthy workers.
+- `POST /add_worker`: add worker via query (`?url=`) or JSON body.
+- `GET /list_workers`: list registered workers.
+- `GET /health`: aggregated router health.
+- `GET /health_workers`: per-worker health and active request counts.
+- `POST /generate`: forwards to worker `/v1/images/generations`.
+- `POST /generate_video`: forwards to worker `/v1/videos`; rejects image-only workers (`T2I`/`I2I`/`TI2I`) with `400`.
+- `POST /update_weights_from_disk`: broadcast to all healthy workers.
+- `GET|POST|PUT|DELETE /{path}`: catch-all proxy forwarding.
 
 ## Installation
 
@@ -37,8 +41,6 @@ cd ..
 
 ## Quick Start
 
-### Start diffusion workers
-
 ```bash
 # If connect to HuggingFace is not allowed
 # You can set the environment variable SGLANG_USE_MODELSCOPE=TRUE
@@ -56,75 +58,15 @@ CUDA_VISIBLE_DEVICES=1 sglang serve \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30002
-```
 
-### Start the router
-
-1. Script entry
-
-```bash
 sglang-d-router --port 30081 \
     --worker-urls http://localhost:30000 http://localhost:30002
 ```
 
-2. Module entry
-
-```bash
-python -m sglang_diffusion_routing --port 30081 \
-    --worker-urls http://localhost:30000 http://localhost:30002
-```
-
-3. Or start empty and add workers later:
-
-```bash
-sglang-d-router --port 30081
-curl -X POST "http://localhost:30081/add_worker?url=http://localhost:30000"
-curl -X POST "http://localhost:30081/add_worker?url=http://localhost:30002"
-```
-
-### Test the router
-
-```bash
-# Check router health
-curl http://localhost:30081/health
-
-# List registered workers
-curl http://localhost:30081/list_workers
-
-# Image generation request (returns base64-encoded image)
-curl -X POST http://localhost:30081/generate \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model": "Qwen/Qwen-Image",
-        "prompt": "a cute cat",
-        "num_images": 1,
-        "response_format": "b64_json"
-    }'
-
-# Decode and save the image locally
-curl -s -X POST http://localhost:30081/generate \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model": "Qwen/Qwen-Image",
-        "prompt": "a cute cat",
-        "num_images": 1,
-        "response_format": "b64_json"
-    }' | python3 -c "
-import sys, json, base64
-resp = json.load(sys.stdin)
-img = base64.b64decode(resp['data'][0]['b64_json'])
-with open('output.png', 'wb') as f:
-    f.write(img)
-print('Saved to output.png')
-"
+## Demonstrative Examples
 
 
-curl -X POST http://localhost:30081/update_weights_from_disk \
-    -H "Content-Type: application/json" \
-    -d '{"model_path": "Qwen/Qwen-Image-2512"}'
-```
-
-### Python requests examples
+### With Python Requests
 
 ```python
 import requests
@@ -166,44 +108,60 @@ print(resp.json())
 # Check per-worker health and load
 resp = requests.get(f"{ROUTER}/health_workers")
 print(resp.json())
+
+# Update weights from disk
+resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
+    "model_path": "Qwen/Qwen-Image-2512",
+})
+print(resp.json())
 ```
 
-## Router API
+### With Curl
 
-- `POST /add_worker`: add worker via query (`?url=`) or JSON body.
-- `GET /list_workers`: list registered workers.
-- `GET /health`: aggregated router health.
-- `GET /health_workers`: per-worker health and active request counts.
-- `POST /generate`: forwards to worker `/v1/images/generations`.
-- `POST /generate_video`: forwards to worker `/v1/videos`; rejects image-only workers (`T2I`/`I2I`/`TI2I`) with `400`.
-- `POST /update_weights_from_disk`: broadcast to healthy workers.
-- `GET|POST|PUT|DELETE /{path}`: catch-all proxy forwarding.
-- `POST /update_weights_from_disk`: broadcast to all healthy workers.
+```bash
+# Check router health
+curl http://localhost:30081/health
 
-## Project Layout
+# List registered workers
+curl http://localhost:30081/list_workers
 
-```text
-.
-├── docs/
-│   └── update_weights_from_disk.md
-├── src/sglang_diffusion_routing/
-│   ├── cli/
-│   └── router/
-├── tests/
-│   ├── benchmarks/
-│   │   └── diffusion_router/
-│   │       ├── bench_router.py
-│   │       └── bench_routing_algorithms.py
-│   └── unit/
-├── pyproject.toml
-└── README.md
+# Image generation request (returns base64-encoded image)
+curl -X POST http://localhost:30081/generate \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "Qwen/Qwen-Image",
+        "prompt": "a cute cat",
+        "num_images": 1,
+        "response_format": "b64_json"
+    }'
+
+# Decode and save the image locally
+curl -s -X POST http://localhost:30081/generate \
+    -H "Content-Type: application/json" \
+    -d '{
+        "model": "Qwen/Qwen-Image",
+        "prompt": "a cute cat",
+        "num_images": 1,
+        "response_format": "b64_json"
+    }' | python3 -c "
+import sys, json, base64
+resp = json.load(sys.stdin)
+img = base64.b64decode(resp['data'][0]['b64_json'])
+with open('output.png', 'wb') as f:
+    f.write(img)
+print('Saved to output.png')
+"
+
+
+curl -X POST http://localhost:30081/update_weights_from_disk \
+    -H "Content-Type: application/json" \
+    -d '{"model_path": "Qwen/Qwen-Image-2512"}'
 ```
 
 ## Acknowledgment
 
-This project is derived from [radixark/miles#544](https://github.com/radixark/miles/pull/544). Thanks to the original authors for their work.
+This project is derived from [radixark/miles#544](https://github.com/radixark/miles/pull/544). Thanks to the original authors.
 
-## Notes
+SGLang Diffusion RL team is responsible for the development and maintenance of this project. Our team mates in alphabetical order:
 
-- Quarantined workers are intentionally not auto-reintroduced.
-- Router responses are fully buffered; streaming passthrough is not implemented.
+Banghua Zhu, Chengliang Qian, Chenyang Zhao, Fenglin Yu, Hao Jin, Huapeng Zhou, Jiajun Li, Kangrui Du, Kun Lin, Mao Cheng, Mengyang Liu, Qiujiang Chen, Shenggui Li, Shirui Chen, Shuwen Wang, Xi Chen, Xiaole Guo, Ying Sheng, Yueming Yuan, Yuhao Yang, Yusheng Su, Zhiheng Ye
