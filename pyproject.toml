@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sglang-diffusion-routing"
-version = "0.1.0"
+version = "0.1.1"
 description = "Load-balancing router for SGLang diffusion workers"
 readme = "README.md"
 requires-python = ">=3.10"

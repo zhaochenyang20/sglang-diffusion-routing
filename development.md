@@ -23,9 +23,9 @@ Single benchmark:
 ```bash
 python tests/benchmarks/diffusion_router/bench_router.py \
     --model Qwen/Qwen-Image \
-    --num-workers 2 \
+    --num-workers 8 \
     --num-prompts 20 \
-    --max-concurrency 4
+    --max-concurrency 8
 ```
 
 Algorithm comparison:
