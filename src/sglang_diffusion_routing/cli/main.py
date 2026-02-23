@@ -24,9 +24,7 @@ def _run_router_server(
             "uvicorn is required to run router. Install with: pip install uvicorn"
         ) from exc
 
-    worker_urls = list(
-        args.worker_urls or []
-    )
+    worker_urls = list(args.worker_urls or [])
     refresh_tasks = []
     for url in worker_urls:
         normalized_url = router.normalize_worker_url(url)
@@ -105,6 +103,7 @@ def _add_router_args(parser: argparse.ArgumentParser) -> None:
         dest="launcher_config",
         help="YAML config for launching router managed workers (see examples/local_launcher.yaml).",
     )
+
 
 def _handle_router(args: argparse.Namespace) -> int:
     log_prefix = "[sglang-d-router]"

@@ -27,9 +27,7 @@ def is_port_available(host: str, port: int) -> bool:
         return sock.connect_ex((connect_host, port)) != 0
 
 
-def reserve_available_port(
-    host: str, preferred_port: int, used_ports: set[int]
-) -> int:
+def reserve_available_port(host: str, preferred_port: int, used_ports: set[int]) -> int:
     """Find and reserve a free port, scanning from preferred_port."""
     if preferred_port < 1 or preferred_port > 65535:
         raise ValueError(f"Invalid port: {preferred_port}")

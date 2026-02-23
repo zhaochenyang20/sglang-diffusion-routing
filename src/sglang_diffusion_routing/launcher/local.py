@@ -65,9 +65,7 @@ class LocalLauncher(LauncherBackend):
             )
 
         if shutil.which("sglang") is None:
-            raise RuntimeError(
-                "'sglang' command not found on PATH. "
-            )
+            raise RuntimeError("'sglang' command not found on PATH. ")
 
         self._result = _launch_workers(
             model=model,
@@ -207,9 +205,7 @@ def _launch_single_worker(
 ) -> LaunchedWorker:
     """Launch a single 'sglang serve' subprocess."""
     preferred_worker_port = worker_base_port + index * 2
-    worker_port = reserve_available_port(
-        worker_host, preferred_worker_port, used_ports
-    )
+    worker_port = reserve_available_port(worker_host, preferred_worker_port, used_ports)
 
     master_port = reserve_available_port(
         "127.0.0.1",

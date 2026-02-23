@@ -12,11 +12,7 @@ from sglang_diffusion_routing.launcher.config import (
     create_backend,
     load_launcher_config,
 )
-from sglang_diffusion_routing.launcher.local import (
-    LocalLauncher,
-    LocalLauncherConfig,
-)
-
+from sglang_diffusion_routing.launcher.local import LocalLauncher, LocalLauncherConfig
 
 
 class TestLocalLauncherConfig:
@@ -55,17 +51,18 @@ class TestLocalLauncherConfig:
             OmegaConf.merge(schema, override)
 
 
-
 class TestLoadLauncherConfig:
     """End-to-end YAML loading with OmegaConf validation."""
 
     def test_minimal_config(self, tmp_path):
         cfg_file = tmp_path / "cfg.yaml"
         cfg_file.write_text(
-            textwrap.dedent("""\
+            textwrap.dedent(
+                """\
                 launcher:
                   model: Qwen/Qwen-Image
-            """)
+            """
+            )
         )
         cfg = load_launcher_config(str(cfg_file))
         assert cfg.model == "Qwen/Qwen-Image"
@@ -75,14 +72,16 @@ class TestLoadLauncherConfig:
     def test_override_defaults(self, tmp_path):
         cfg_file = tmp_path / "cfg.yaml"
         cfg_file.write_text(
-            textwrap.dedent("""\
+            textwrap.dedent(
+                """\
                 launcher:
                   model: my-model
                   num_workers: 4
                   num_gpus_per_worker: 2
                   worker_base_port: 20000
                   wait_timeout: 300
-            """)
+            """
+            )
         )
         cfg = load_launcher_config(str(cfg_file))
         assert cfg.num_workers == 4
@@ -93,10 +92,12 @@ class TestLoadLauncherConfig:
     def test_missing_model_raises(self, tmp_path):
         cfg_file = tmp_path / "cfg.yaml"
         cfg_file.write_text(
-            textwrap.dedent("""\
+            textwrap.dedent(
+                """\
                 launcher:
                   num_workers: 2
-            """)
+            """
+            )
         )
         cfg = load_launcher_config(str(cfg_file))
         with pytest.raises(Exception):  # MissingMandatoryValue on access
@@ -111,11 +112,13 @@ class TestLoadLauncherConfig:
     def test_unknown_backend_raises(self, tmp_path):
         cfg_file = tmp_path / "cfg.yaml"
         cfg_file.write_text(
-            textwrap.dedent("""\
+            textwrap.dedent(
+                """\
                 launcher:
                   backend: kubernetes
                   model: my-model
-            """)
+            """
+            )
         )
         with pytest.raises(ValueError, match="Unknown launcher backend"):
             load_launcher_config(str(cfg_file))
@@ -127,15 +130,16 @@ class TestLoadLauncherConfig:
     def test_unknown_key_in_yaml_raises(self, tmp_path):
         cfg_file = tmp_path / "cfg.yaml"
         cfg_file.write_text(
-            textwrap.dedent("""\
+            textwrap.dedent(
+                """\
                 launcher:
                   model: my-model
                   bogus_key: 123
-            """)
+            """
+            )
         )
         with pytest.raises(Exception):  # ConfigKeyError
             load_launcher_config(str(cfg_file))
-
 
 
 class TestCreateBackend:
@@ -152,12 +156,9 @@ class TestCreateBackend:
             create_backend(cfg)
 
 
-
 class TestLocalLauncherLaunch:
     def test_launch_returns_worker_urls(self):
-        cfg = OmegaConf.structured(
-            LocalLauncherConfig(model="my-model", num_workers=2)
-        )
+        cfg = OmegaConf.structured(LocalLauncherConfig(model="my-model", num_workers=2))
         launcher = LocalLauncher(cfg)
 
         fake_proc = mock.MagicMock()
@@ -181,9 +182,7 @@ class TestLocalLauncherLaunch:
         assert all(u.startswith("http://") for u in urls)
 
     def test_launch_raises_without_sglang(self):
-        cfg = OmegaConf.structured(
-            LocalLauncherConfig(model="my-model")
-        )
+        cfg = OmegaConf.structured(LocalLauncherConfig(model="my-model"))
         launcher = LocalLauncher(cfg)
 
         with mock.patch("shutil.which", return_value=None):
@@ -191,9 +190,7 @@ class TestLocalLauncherLaunch:
                 launcher.launch()
 
     def test_launch_raises_on_empty_model(self):
-        cfg = OmegaConf.structured(
-            LocalLauncherConfig(model="  ")
-        )
+        cfg = OmegaConf.structured(LocalLauncherConfig(model="  "))
         launcher = LocalLauncher(cfg)
 
         with pytest.raises(ValueError, match="model.*required"):
