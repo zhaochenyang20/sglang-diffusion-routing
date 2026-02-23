@@ -17,11 +17,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package and pytest
+      - name: Install package and test dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
-          python -m pip install pytest
+          python -m pip install -e ".[test]"
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 
       - name: Run CPU unit tests
         run: pytest tests/unit -v

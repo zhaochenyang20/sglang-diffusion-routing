@@ -27,6 +27,12 @@ classifiers = [
 [project.scripts]
 sglang-d-router = "sglang_diffusion_routing.cli.main:main"
 
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "PyYAML",
+]
+
 [tool.setuptools]
 package-dir = { "" = "src" }
 
