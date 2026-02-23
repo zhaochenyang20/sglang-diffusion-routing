@@ -158,6 +158,30 @@ curl -X POST http://localhost:30081/update_weights_from_disk \
     -d '{"model_path": "Qwen/Qwen-Image-2512"}'
 ```
 
+### Auto-launch workers via YAML config
+
+Instead of starting workers manually, you can let the router spawn and manage
+them through a launcher backend.
+
+**Local subprocess launcher** (`examples/local_launcher.yaml`):
+
+```bash
+sglang-d-router --port 30081 --launcher-config examples/local_launcher.yaml
+```
+
+```yaml
+launcher:
+  backend: local
+  model: Qwen/Qwen-Image
+  num_workers: 2
+  num_gpus_per_worker: 1
+  worker_base_port: 10090
+  wait_timeout: 600
+```
+
+Fields not set in the YAML fall back to defaults defined in each backend's
+config dataclass (see `LocalLauncherConfig`).
+
 ## Acknowledgment
 
 This project is derived from [radixark/miles#544](https://github.com/radixark/miles/pull/544). Thanks to the original authors.
