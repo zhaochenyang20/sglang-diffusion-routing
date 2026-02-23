@@ -93,25 +93,52 @@ def _env() -> dict[str, str]:
 
 def _start_worker(worker_id: str, **kw) -> tuple[subprocess.Popen, str]:
     port = _find_free_port()
-    cmd = [PYTHON, str(FAKE_WORKER_SCRIPT), "--port", str(port), "--worker-id", worker_id]
+    cmd = [
+        PYTHON,
+        str(FAKE_WORKER_SCRIPT),
+        "--port",
+        str(port),
+        "--worker-id",
+        worker_id,
+    ]
     for k, v in kw.items():
         cmd += [f"--{k.replace('_', '-')}", str(v)]
-    proc = subprocess.Popen(cmd, env=_env(), start_new_session=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        cmd,
+        env=_env(),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     return proc, f"http://127.0.0.1:{port}"
 
 
 def _start_router(worker_urls: list[str], **kw) -> tuple[subprocess.Popen, str]:
     port = _find_free_port()
-    cmd = [PYTHON, "-m", "sglang_diffusion_routing",
-           "--host", "127.0.0.1", "--port", str(port),
-           "--health-check-interval", "3600", "--log-level", "warning"]
+    cmd = [
+        PYTHON,
+        "-m",
+        "sglang_diffusion_routing",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--health-check-interval",
+        "3600",
+        "--log-level",
+        "warning",
+    ]
     if worker_urls:
         cmd += ["--worker-urls", *worker_urls]
     for k, v in kw.items():
         cmd += [f"--{k.replace('_', '-')}", str(v)]
-    proc = subprocess.Popen(cmd, env=_env(), start_new_session=True,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    proc = subprocess.Popen(
+        cmd,
+        env=_env(),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     return proc, f"http://127.0.0.1:{port}"
 
 
@@ -142,8 +169,9 @@ def fake_workers():
 
 @pytest.fixture(scope="module")
 def router_url(fake_workers):
-    proc, url = _start_router([w.url for w in fake_workers],
-                              routing_algorithm="round-robin")
+    proc, url = _start_router(
+        [w.url for w in fake_workers], routing_algorithm="round-robin"
+    )
     try:
         _wait_healthy(url)
     except TimeoutError:
@@ -166,7 +194,9 @@ class TestHealth:
         assert body["total_workers"] == 2
 
     def test_health_workers_detail(self, router_url):
-        workers = httpx.get(f"{router_url}/health_workers", timeout=5.0).json()["workers"]
+        workers = httpx.get(f"{router_url}/health_workers", timeout=5.0).json()[
+            "workers"
+        ]
         assert len(workers) == 2
         for w in workers:
             assert not w["is_dead"]
@@ -201,7 +231,9 @@ class TestWorkerRegistration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/add_worker", params={"url": fake_workers[0].url}, timeout=5.0)
+            r = httpx.post(
+                f"{rurl}/add_worker", params={"url": fake_workers[0].url}, timeout=5.0
+            )
             assert r.status_code == 200
             assert fake_workers[0].url in r.json()["worker_urls"]
         finally:
@@ -211,7 +243,9 @@ class TestWorkerRegistration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/add_worker", json={"url": fake_workers[0].url}, timeout=5.0)
+            r = httpx.post(
+                f"{rurl}/add_worker", json={"url": fake_workers[0].url}, timeout=5.0
+            )
             assert r.status_code == 200
             assert r.json()["status"] == "success"
         finally:
@@ -224,7 +258,9 @@ class TestWorkerRegistration:
             url = fake_workers[0].url
             httpx.post(f"{rurl}/add_worker", params={"url": url + "/"}, timeout=5.0)
             httpx.post(f"{rurl}/add_worker", params={"url": url}, timeout=5.0)
-            assert len(httpx.get(f"{rurl}/list_workers", timeout=5.0).json()["urls"]) == 1
+            assert (
+                len(httpx.get(f"{rurl}/list_workers", timeout=5.0).json()["urls"]) == 1
+            )
         finally:
             _kill_proc(proc)
 
@@ -242,7 +278,11 @@ class TestWorkerRegistration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/add_worker", params={"url": "http://169.254.169.254:80"}, timeout=5.0)
+            r = httpx.post(
+                f"{rurl}/add_worker",
+                params={"url": "http://169.254.169.254:80"},
+                timeout=5.0,
+            )
             assert r.status_code == 400
             assert "blocked" in r.json()["error"]
         finally:
@@ -252,8 +292,12 @@ class TestWorkerRegistration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/add_worker", content=b"bad json",
-                           headers={"content-type": "application/json"}, timeout=5.0)
+            r = httpx.post(
+                f"{rurl}/add_worker",
+                content=b"bad json",
+                headers={"content-type": "application/json"},
+                timeout=5.0,
+            )
             assert r.status_code == 400
         finally:
             _kill_proc(proc)
@@ -266,10 +310,14 @@ class TestWorkerRegistration:
             _wait_healthy(w_url)
             _wait_responding(rurl)
             httpx.post(f"{rurl}/add_worker", params={"url": w_url}, timeout=5.0)
-            assert len(httpx.get(f"{rurl}/list_workers", timeout=5.0).json()["urls"]) == 1
-            r = httpx.post(f"{rurl}/generate",
-                           json={"prompt": "t", "response_format": "b64_json"},
-                           timeout=10.0)
+            assert (
+                len(httpx.get(f"{rurl}/list_workers", timeout=5.0).json()["urls"]) == 1
+            )
+            r = httpx.post(
+                f"{rurl}/generate",
+                json={"prompt": "t", "response_format": "b64_json"},
+                timeout=10.0,
+            )
             assert r.status_code == 200
             assert r.json()["worker_id"] == "dynamic"
         finally:
@@ -282,9 +330,16 @@ class TestWorkerRegistration:
 
 class TestImageGeneration:
     def test_b64_json_returns_valid_png(self, router_url):
-        r = httpx.post(f"{router_url}/generate",
-                       json={"model": "test-model", "prompt": "cat", "num_images": 1,
-                             "response_format": "b64_json"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate",
+            json={
+                "model": "test-model",
+                "prompt": "cat",
+                "num_images": 1,
+                "response_format": "b64_json",
+            },
+            timeout=10.0,
+        )
         assert r.status_code == 200
         body = r.json()
         assert "data" in body
@@ -293,17 +348,31 @@ class TestImageGeneration:
         assert img[:4] == b"\x89PNG"
 
     def test_url_format(self, router_url):
-        r = httpx.post(f"{router_url}/generate",
-                       json={"model": "t", "prompt": "dog", "num_images": 1,
-                             "response_format": "url"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate",
+            json={
+                "model": "t",
+                "prompt": "dog",
+                "num_images": 1,
+                "response_format": "url",
+            },
+            timeout=10.0,
+        )
         data = r.json()["data"][0]
         assert "url" in data
         assert data["url"].startswith("http")
 
     def test_multiple_images(self, router_url):
-        r = httpx.post(f"{router_url}/generate",
-                       json={"model": "t", "prompt": "x", "num_images": 3,
-                             "response_format": "b64_json"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate",
+            json={
+                "model": "t",
+                "prompt": "x",
+                "num_images": 3,
+                "response_format": "b64_json",
+            },
+            timeout=10.0,
+        )
         data = r.json()["data"]
         assert len(data) == 3
         # Each image should have an index
@@ -312,15 +381,29 @@ class TestImageGeneration:
 
     def test_prompt_preserved_in_response(self, router_url):
         prompt = "a beautiful sunset over the ocean"
-        r = httpx.post(f"{router_url}/generate",
-                       json={"model": "t", "prompt": prompt, "num_images": 1,
-                             "response_format": "b64_json"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate",
+            json={
+                "model": "t",
+                "prompt": prompt,
+                "num_images": 1,
+                "response_format": "b64_json",
+            },
+            timeout=10.0,
+        )
         assert r.json()["data"][0]["revised_prompt"] == prompt
 
     def test_model_field_preserved(self, router_url):
-        r = httpx.post(f"{router_url}/generate",
-                       json={"model": "my-custom-model", "prompt": "x", "num_images": 1,
-                             "response_format": "b64_json"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate",
+            json={
+                "model": "my-custom-model",
+                "prompt": "x",
+                "num_images": 1,
+                "response_format": "b64_json",
+            },
+            timeout=10.0,
+        )
         assert r.json()["model"] == "my-custom-model"
 
     def test_no_workers_503(self):
@@ -339,8 +422,11 @@ class TestImageGeneration:
 
 class TestVideoGeneration:
     def test_generate_video(self, router_url):
-        r = httpx.post(f"{router_url}/generate_video",
-                       json={"model": "vid-model", "prompt": "river"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate_video",
+            json={"model": "vid-model", "prompt": "river"},
+            timeout=10.0,
+        )
         assert r.status_code == 200
         body = r.json()
         assert "url" in body["data"][0]
@@ -348,8 +434,11 @@ class TestVideoGeneration:
 
     def test_video_prompt_preserved(self, router_url):
         prompt = "a flowing river in autumn"
-        r = httpx.post(f"{router_url}/generate_video",
-                       json={"model": "vid", "prompt": prompt}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/generate_video",
+            json={"model": "vid", "prompt": prompt},
+            timeout=10.0,
+        )
         assert r.json()["data"][0]["revised_prompt"] == prompt
 
     def test_no_workers_503(self):
@@ -367,8 +456,11 @@ class TestVideoGeneration:
 
 class TestUpdateWeights:
     def test_broadcasts_to_all(self, router_url):
-        r = httpx.post(f"{router_url}/update_weights_from_disk",
-                       json={"model_path": "/weights/v2"}, timeout=10.0)
+        r = httpx.post(
+            f"{router_url}/update_weights_from_disk",
+            json={"model_path": "/weights/v2"},
+            timeout=10.0,
+        )
         results = r.json()["results"]
         assert len(results) == 2
         for res in results:
@@ -381,7 +473,11 @@ class TestUpdateWeights:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/update_weights_from_disk", json={"model_path": "x"}, timeout=5.0)
+            r = httpx.post(
+                f"{rurl}/update_weights_from_disk",
+                json={"model_path": "x"},
+                timeout=5.0,
+            )
             assert r.json()["results"] == []
         finally:
             _kill_proc(proc)
@@ -396,9 +492,14 @@ class TestRoundRobinBalancing:
     def test_distributes_evenly(self, router_url, fake_workers):
         initial = [w.stats()["generate"] for w in fake_workers]
         for _ in range(10):
-            assert httpx.post(f"{router_url}/generate",
-                              json={"prompt": "t", "response_format": "b64_json"},
-                              timeout=10.0).status_code == 200
+            assert (
+                httpx.post(
+                    f"{router_url}/generate",
+                    json={"prompt": "t", "response_format": "b64_json"},
+                    timeout=10.0,
+                ).status_code
+                == 200
+            )
         final = [w.stats()["generate"] for w in fake_workers]
         deltas = [final[i] - initial[i] for i in range(2)]
         assert all(d > 0 for d in deltas)
@@ -410,8 +511,11 @@ class TestRoundRobinBalancing:
         """Consecutive requests should alternate between workers."""
         ids = []
         for _ in range(4):
-            r = httpx.post(f"{router_url}/generate",
-                           json={"prompt": "t", "response_format": "b64_json"}, timeout=10.0)
+            r = httpx.post(
+                f"{router_url}/generate",
+                json={"prompt": "t", "response_format": "b64_json"},
+                timeout=10.0,
+            )
             ids.append(r.json()["worker_id"])
         # Round-robin: should alternate
         assert ids[0] != ids[1]
@@ -438,6 +542,7 @@ class TestLeastRequestBalancing:
 
             # Send requests concurrently — fast worker should get more
             import concurrent.futures
+
             def send_one():
                 return httpx.post(
                     f"{rurl}/generate",
@@ -508,9 +613,11 @@ class TestWorkerFailure:
         try:
             _wait_healthy(w_url)
             _wait_healthy(rurl)
-            r = httpx.post(f"{rurl}/generate",
-                           json={"prompt": "t", "response_format": "b64_json"},
-                           timeout=10.0)
+            r = httpx.post(
+                f"{rurl}/generate",
+                json={"prompt": "t", "response_format": "b64_json"},
+                timeout=10.0,
+            )
             assert r.status_code == 500
             assert "detail" in r.json()
         finally:
@@ -525,16 +632,23 @@ class TestWorkerFailure:
             _wait_healthy(w_url)
             _wait_healthy(rurl)
             # Verify it works first
-            assert httpx.post(f"{rurl}/generate",
-                              json={"prompt": "t", "response_format": "b64_json"},
-                              timeout=10.0).status_code == 200
+            assert (
+                httpx.post(
+                    f"{rurl}/generate",
+                    json={"prompt": "t", "response_format": "b64_json"},
+                    timeout=10.0,
+                ).status_code
+                == 200
+            )
             # Kill the worker
             _kill_proc(w_proc)
             time.sleep(0.5)
             # Now requests should fail
-            r = httpx.post(f"{rurl}/generate",
-                           json={"prompt": "t", "response_format": "b64_json"},
-                           timeout=10.0)
+            r = httpx.post(
+                f"{rurl}/generate",
+                json={"prompt": "t", "response_format": "b64_json"},
+                timeout=10.0,
+            )
             assert r.status_code == 502
         finally:
             _kill_proc(w_proc)
@@ -572,13 +686,16 @@ class TestConcurrency:
         import concurrent.futures
 
         def gen_image():
-            return httpx.post(f"{router_url}/generate",
-                              json={"prompt": "img", "response_format": "b64_json"},
-                              timeout=15.0)
+            return httpx.post(
+                f"{router_url}/generate",
+                json={"prompt": "img", "response_format": "b64_json"},
+                timeout=15.0,
+            )
 
         def gen_video():
-            return httpx.post(f"{router_url}/generate_video",
-                              json={"prompt": "vid"}, timeout=15.0)
+            return httpx.post(
+                f"{router_url}/generate_video", json={"prompt": "vid"}, timeout=15.0
+            )
 
         def check_health():
             return httpx.get(f"{router_url}/health", timeout=5.0)
@@ -601,20 +718,35 @@ class TestCLI:
     def test_cli_starts_working_router(self, fake_workers):
         port = _find_free_port()
         proc = subprocess.Popen(
-            [PYTHON, "-m", "sglang_diffusion_routing",
-             "--host", "127.0.0.1", "--port", str(port),
-             "--worker-urls", *[w.url for w in fake_workers],
-             "--routing-algorithm", "least-request", "--log-level", "warning"],
-            env=_env(), start_new_session=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            [
+                PYTHON,
+                "-m",
+                "sglang_diffusion_routing",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--worker-urls",
+                *[w.url for w in fake_workers],
+                "--routing-algorithm",
+                "least-request",
+                "--log-level",
+                "warning",
+            ],
+            env=_env(),
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         url = f"http://127.0.0.1:{port}"
         try:
             _wait_healthy(url)
             assert httpx.get(f"{url}/health", timeout=5.0).status_code == 200
-            r = httpx.post(f"{url}/generate",
-                           json={"prompt": "cli", "response_format": "b64_json"},
-                           timeout=10.0)
+            r = httpx.post(
+                f"{url}/generate",
+                json={"prompt": "cli", "response_format": "b64_json"},
+                timeout=10.0,
+            )
             assert r.status_code == 200
             assert "data" in r.json()
         finally:
@@ -628,12 +760,21 @@ class TestCLI:
             pytest.skip("sglang-d-router not installed in PATH")
         port = _find_free_port()
         proc = subprocess.Popen(
-            [str(script),
-             "--host", "127.0.0.1", "--port", str(port),
-             "--worker-urls", *[w.url for w in fake_workers],
-             "--log-level", "warning"],
-            env=_env(), start_new_session=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            [
+                str(script),
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--worker-urls",
+                *[w.url for w in fake_workers],
+                "--log-level",
+                "warning",
+            ],
+            env=_env(),
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         url = f"http://127.0.0.1:{port}"
         try:
@@ -643,8 +784,12 @@ class TestCLI:
             _kill_proc(proc)
 
     def test_help_flag(self):
-        r = subprocess.run([PYTHON, "-m", "sglang_diffusion_routing", "--help"],
-                           capture_output=True, text=True, timeout=10)
+        r = subprocess.run(
+            [PYTHON, "-m", "sglang_diffusion_routing", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
         assert r.returncode == 0
         assert "sglang-d-router" in r.stdout
 
@@ -652,12 +797,24 @@ class TestCLI:
         """Router with --verbose should start and work normally."""
         port = _find_free_port()
         proc = subprocess.Popen(
-            [PYTHON, "-m", "sglang_diffusion_routing",
-             "--host", "127.0.0.1", "--port", str(port),
-             "--worker-urls", *[w.url for w in fake_workers],
-             "--verbose", "--log-level", "warning"],
-            env=_env(), start_new_session=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            [
+                PYTHON,
+                "-m",
+                "sglang_diffusion_routing",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--worker-urls",
+                *[w.url for w in fake_workers],
+                "--verbose",
+                "--log-level",
+                "warning",
+            ],
+            env=_env(),
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         url = f"http://127.0.0.1:{port}"
         try:
