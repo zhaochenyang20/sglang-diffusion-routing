@@ -7,5 +7,10 @@ launcher:
   worker_base_port: 10090
 
   worker_extra_args: "--dit-cpu-offload false --text-encoder-cpu-offload false"
+  # Each worker uses: master_port_base + i * internal_port_stride
+  #                   scheduler_port_base + i * internal_port_stride
+  master_port_base: 30005
+  scheduler_port_base: 5555
+  internal_port_stride: 1000
 
   wait_timeout: 600

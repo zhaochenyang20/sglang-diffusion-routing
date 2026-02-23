@@ -43,6 +43,10 @@ class LocalLauncherConfig:
     worker_extra_args: str = ""
     log_prefix: str = "[local-launcher]"
 
+    master_port_base: int = 30005
+    scheduler_port_base: int = 5555
+    internal_port_stride: int = 1000
+
     wait_timeout: int = 600
 
 
@@ -75,6 +79,9 @@ class LocalLauncher(LauncherBackend):
             worker_base_port=cfg.worker_base_port,
             worker_gpu_ids=cfg.worker_gpu_ids,
             worker_extra_args=cfg.worker_extra_args,
+            master_port_base=cfg.master_port_base,
+            scheduler_port_base=cfg.scheduler_port_base,
+            internal_port_stride=cfg.internal_port_stride,
             log_prefix=cfg.log_prefix,
         )
         return self._result.urls
@@ -138,6 +145,9 @@ def _launch_workers(
     worker_base_port: int = 10090,
     worker_gpu_ids: list[str] | None = None,
     worker_extra_args: str = "",
+    master_port_base: int = 30005,
+    scheduler_port_base: int = 5555,
+    internal_port_stride: int = 1000,
     log_prefix: str = "[launcher]",
 ) -> WorkerLaunchResult:
     """Launch num_workers 'sglang serve' subprocesses."""
@@ -154,10 +164,6 @@ def _launch_workers(
     host_for_url = infer_connect_host(worker_host)
     used_ports: set[int] = set()
     result = WorkerLaunchResult()
-
-    master_port_base = 30005
-    scheduler_port_base = 5555
-    internal_port_stride = 1000
 
     for i in range(num_workers):
         worker = _launch_single_worker(
