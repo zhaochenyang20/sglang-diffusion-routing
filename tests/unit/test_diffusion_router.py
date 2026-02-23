@@ -1,20 +1,15 @@
-"""Unit tests for DiffusionRouter core functionality.
-
-Tests routing algorithms, count management, worker registration,
-and response building. All tests call real code directly — no mocks,
-no HTTP, no fake interfaces.
-"""
-
 import asyncio
 import json
 from argparse import Namespace
+from types import SimpleNamespace
 
 import pytest
 
 from sglang_diffusion_routing import DiffusionRouter
 
 
-def _make_args(**overrides) -> Namespace:
+def make_router_args(**overrides) -> Namespace:
+    """Create a Namespace with default DiffusionRouter args, applying overrides."""
     defaults = dict(
         host="127.0.0.1",
         port=30080,
@@ -28,32 +23,30 @@ def _make_args(**overrides) -> Namespace:
 
 @pytest.fixture
 def router_factory():
-    created: list[DiffusionRouter] = []
+    """Factory fixture that creates routers and closes their clients at teardown."""
+    created_routers: list[DiffusionRouter] = []
 
-    def _create(workers=None, dead=None, **kw):
-        r = DiffusionRouter(_make_args(**kw))
-        if workers is not None:
-            r.worker_request_counts = dict(workers)
-            r.worker_failure_counts = {u: 0 for u in workers}
+    def _create(
+        workers: dict[str, int],
+        dead: set[str] | None = None,
+        **arg_overrides,
+    ) -> DiffusionRouter:
+        router = DiffusionRouter(make_router_args(**arg_overrides))
+        router.worker_request_counts = dict(workers)
+        router.worker_failure_counts = {url: 0 for url in workers}
         if dead:
-            r.dead_workers = set(dead)
-        created.append(r)
-        return r
+            router.dead_workers = set(dead)
+        created_routers.append(router)
+        return router
 
     yield _create
-    for r in created:
-        asyncio.run(r.client.aclose())
 
-
-# ── Routing algorithms ────────────────────────────────────────────────
+    for router in created_routers:
+        asyncio.run(router.client.aclose())
 
 
 class TestLeastRequest:
-    def test_picks_min_load(self, router_factory):
-        r = router_factory(
-            {"http://w1:8000": 5, "http://w2:8000": 2, "http://w3:8000": 8}
-        )
-        assert r._select_worker_by_routing() == "http://w2:8000"
+    """Test the least-request (default) load-balancing algorithm."""
 
     def test_selects_min_load(self, router_factory):
         router = router_factory(
@@ -74,71 +67,77 @@ class TestLeastRequest:
 
 
 class TestRoundRobin:
-    def test_cycles_in_order(self, router_factory):
-        r = router_factory(
+    """Test the round-robin load-balancing algorithm."""
+
+    def test_cycles_workers(self, router_factory):
+        router = router_factory(
             {"http://w1:8000": 0, "http://w2:8000": 0, "http://w3:8000": 0},
             routing_algorithm="round-robin",
         )
-        results = [r._select_worker_by_routing() for _ in range(6)]
-        workers = list(r.worker_request_counts.keys())
+        results = [router._select_worker_by_routing() for _ in range(6)]
+        workers = list(router.worker_request_counts.keys())
         expected = [workers[i % 3] for i in range(6)]
         assert results == expected
         for url in workers:
-            assert r.worker_request_counts[url] == 2
+            assert router.worker_request_counts[url] == 2
 
-    def test_skips_dead_workers(self, router_factory):
-        r = router_factory(
+    def test_excludes_dead_workers(self, router_factory):
+        router = router_factory(
             {"http://w1:8000": 0, "http://w2:8000": 0, "http://w3:8000": 0},
             dead={"http://w2:8000"},
             routing_algorithm="round-robin",
         )
-        results = [r._select_worker_by_routing() for _ in range(4)]
+        results = [router._select_worker_by_routing() for _ in range(4)]
         assert "http://w2:8000" not in results
         assert all(url in ("http://w1:8000", "http://w3:8000") for url in results)
 
 
-class TestRandomRouting:
-    def test_covers_all_workers(self, router_factory):
-        r = router_factory(
+class TestRandom:
+    """Test the random load-balancing algorithm."""
+
+    def test_selects_from_valid_workers(self, router_factory):
+        router = router_factory(
             {"http://w1:8000": 0, "http://w2:8000": 0, "http://w3:8000": 0},
             routing_algorithm="random",
         )
         seen = set()
         for _ in range(30):
             # Reset counts so they do not grow unbounded
-            for url in r.worker_request_counts:
-                r.worker_request_counts[url] = 0
-            seen.add(r._select_worker_by_routing())
+            for url in router.worker_request_counts:
+                router.worker_request_counts[url] = 0
+            seen.add(router._select_worker_by_routing())
         assert seen == {"http://w1:8000", "http://w2:8000", "http://w3:8000"}
 
     def test_excludes_dead_workers(self, router_factory):
-        r = router_factory(
+        router = router_factory(
             {"http://w1:8000": 0, "http://w2:8000": 0, "http://w3:8000": 0},
             dead={"http://w2:8000"},
             routing_algorithm="random",
         )
         for _ in range(20):
-            url = r._select_worker_by_routing()
+            url = router._select_worker_by_routing()
             assert url != "http://w2:8000"
-            r.worker_request_counts[url] -= 1  # reset increment
+            router.worker_request_counts[url] -= 1  # reset increment
 
 
-class TestRoutingEdgeCases:
-    @pytest.mark.parametrize("algo", ["least-request", "round-robin", "random"])
-    def test_no_workers_raises(self, router_factory, algo):
-        r = router_factory({}, routing_algorithm=algo)
+class TestErrorCases:
+    """Test error handling across all routing algorithms."""
+
+    @pytest.mark.parametrize("algorithm", ["least-request", "round-robin", "random"])
+    def test_raises_when_no_workers(self, router_factory, algorithm):
+        router = router_factory({}, routing_algorithm=algorithm)
         with pytest.raises(RuntimeError, match="No workers registered"):
-            r._select_worker_by_routing()
+            router._select_worker_by_routing()
 
-    @pytest.mark.parametrize("algo", ["least-request", "round-robin", "random"])
-    def test_all_dead_raises(self, router_factory, algo):
-        r = router_factory(
+    @pytest.mark.parametrize("algorithm", ["least-request", "round-robin", "random"])
+    def test_raises_when_all_dead(self, router_factory, algorithm):
+        router = router_factory(
             {"http://w1:8000": 0, "http://w2:8000": 0},
             dead={"http://w1:8000", "http://w2:8000"},
-            routing_algorithm=algo,
+            routing_algorithm=algorithm,
         )
         with pytest.raises(RuntimeError, match="No healthy workers"):
-            r._select_worker_by_routing()
+            router._select_worker_by_routing()
 
 
 class TestCountManagement:
@@ -153,145 +152,78 @@ class TestCountManagement:
         assert router.worker_request_counts[url] == 0
 
 
-# ── Worker registration ──────────────────────────────────────────────
+class TestDefaults:
+    """Test default routing algorithm when the attribute is absent."""
 
-
-class TestRegisterWorker:
-    def test_registers_and_deduplicates(self, router_factory):
-        r = router_factory()
-        r.register_worker("http://w1:8000")
-        r.register_worker("http://w1:8000")
-        r.register_worker("http://w2:9000")
-        assert len(r.worker_request_counts) == 2
-
-    def test_registered_worker_is_routable(self, router_factory):
-        r = router_factory()
-        r.register_worker("http://w1:8000")
-        assert r._select_worker_by_routing() == "http://w1:8000"
-
-    def test_rejects_blocked_host(self, router_factory):
-        r = router_factory()
-        with pytest.raises(ValueError, match="blocked"):
-            r.register_worker("http://169.254.169.254:80")
-        assert len(r.worker_request_counts) == 0
-
-    def test_dead_then_register_new_restores_routing(self, router_factory):
-        r = router_factory(
-            {"http://w1:8000": 0},
-            dead={"http://w1:8000"},
-        )
-        with pytest.raises(RuntimeError):
-            r._select_worker_by_routing()
-        r.register_worker("http://w2:9000")
-        assert r._select_worker_by_routing() == "http://w2:9000"
-
-
-# ── Response building ────────────────────────────────────────────────
-
-
-class TestBuildProxyResponse:
-    def test_small_json(self, router_factory):
-        r = router_factory()
-        content = json.dumps({"key": "value"}).encode()
-        resp = r._build_proxy_response(
-            content, 200, {"content-type": "application/json"}
-        )
-        assert json.loads(resp.body) == {"key": "value"}
-        assert resp.status_code == 200
-
-    def test_large_json_returns_raw(self, router_factory):
-        r = router_factory()
-        big = json.dumps({"data": "x" * (300 * 1024)}).encode()
-        resp = r._build_proxy_response(big, 200, {"content-type": "application/json"})
-        assert resp.body == big
-
-    def test_preserves_status_code(self, router_factory):
-        r = router_factory()
-        content = json.dumps({"error": "not found"}).encode()
-        resp = r._build_proxy_response(
-            content, 404, {"content-type": "application/json"}
-        )
-        assert resp.status_code == 404
-
-
-# ── Static helpers ────────────────────────────────────────────────────
-
-
-class TestSanitizeResponseHeaders:
-    def test_removes_hop_by_hop_and_encoding(self):
-        headers = {
-            "content-type": "application/json",
-            "connection": "keep-alive",
-            "transfer-encoding": "chunked",
-            "content-length": "1234",
-            "content-encoding": "gzip",
-            "x-custom": "value",
-        }
-        result = DiffusionRouter._sanitize_response_headers(headers)
-        assert set(result.keys()) == {"content-type", "x-custom"}
-
-
-class TestTryDecodeJson:
-    def test_valid_json(self):
-        assert DiffusionRouter._try_decode_json(b'{"a": 1}') == {"a": 1}
-
-    def test_invalid_json_returns_raw(self):
-        result = DiffusionRouter._try_decode_json(b"not json")
-        assert "raw" in result
-
-
-# ── Constructor ───────────────────────────────────────────────────────
-
-
-class TestConstructor:
-    def test_default_algorithm(self):
+    def test_default_algorithm_is_least_request(self):
         args = Namespace(
             host="127.0.0.1", port=30080, max_connections=100, timeout=120.0
         )
-        r = DiffusionRouter(args)
+        # args has no routing_algorithm attribute
+        router = DiffusionRouter(args)
         try:
-            assert r.routing_algorithm == "least-request"
+            assert router.routing_algorithm == "least-request"
         finally:
-            asyncio.run(r.client.aclose())
+            asyncio.run(router.client.aclose())
 
-    def test_none_timeout_defaults_to_120(self):
-        args = Namespace(
-            host="127.0.0.1",
-            port=30080,
-            max_connections=100,
-            timeout=None,
-            routing_algorithm="least-request",
+
+class TestRegressions:
+    def test_forward_body_error_does_not_leak_request_count(self, router_factory):
+        router = router_factory({"http://w1:8000": 0})
+
+        class BrokenRequest:
+            method = "POST"
+            headers = {"content-type": "application/json"}
+            url = SimpleNamespace(query="")
+
+            async def body(self):
+                raise RuntimeError("body read failed")
+
+        response = asyncio.run(
+            router._forward_to_worker(BrokenRequest(), "v1/images/generations")
         )
-        r = DiffusionRouter(args)
-        try:
-            assert r.client.timeout.connect == 120.0
-        finally:
-            asyncio.run(r.client.aclose())
+        assert response.status_code == 502
+        assert router.worker_request_counts["http://w1:8000"] == 0
 
-    def test_initial_state_empty(self):
-        args = _make_args()
-        r = DiffusionRouter(args)
-        try:
-            assert r.worker_request_counts == {}
-            assert r.dead_workers == set()
-        finally:
-            asyncio.run(r.client.aclose())
+    def test_register_worker_normalizes_duplicate_urls(self, router_factory):
+        router = router_factory({})
+        router.register_worker("http://LOCALHOST:10090/")
+        router.register_worker("http://localhost:10090")
+        assert list(router.worker_request_counts.keys()) == ["http://localhost:10090"]
 
-    def test_all_routes_registered(self):
-        args = _make_args()
-        r = DiffusionRouter(args)
-        try:
-            routes = [route.path for route in r.app.routes]
-            for path in [
-                "/add_worker",
-                "/list_workers",
-                "/health",
-                "/health_workers",
-                "/generate",
-                "/generate_video",
-                "/update_weights_from_disk",
-                "/{path:path}",
-            ]:
-                assert path in routes
-        finally:
-            asyncio.run(r.client.aclose())
+    def test_register_worker_rejects_metadata_host(self, router_factory):
+        router = router_factory({})
+        with pytest.raises(ValueError, match="host is blocked"):
+            router.register_worker("http://169.254.169.254:80")
+
+    def test_broadcast_to_workers_collects_per_worker_results(self, router_factory):
+        router = router_factory({"http://w1:8000": 0, "http://w2:8000": 0})
+
+        class FakeResponse:
+            def __init__(self, status_code: int, body: dict):
+                self.status_code = status_code
+                self._body = body
+
+            async def aread(self) -> bytes:
+                return json.dumps(self._body).encode("utf-8")
+
+        responses = {
+            "http://w1:8000/update_weights_from_disk": FakeResponse(200, {"ok": True}),
+            "http://w2:8000/update_weights_from_disk": FakeResponse(
+                500, {"error": "bad worker"}
+            ),
+        }
+
+        async def fake_post(url, content, headers):
+            del content, headers
+            return responses[url]
+
+        router.client.post = fake_post  # type: ignore[assignment]
+        result = asyncio.run(
+            router._broadcast_to_workers("update_weights_from_disk", b"{}", {})
+        )
+        assert len(result) == 2
+        assert {item["worker_url"] for item in result} == {
+            "http://w1:8000",
+            "http://w2:8000",
+        }

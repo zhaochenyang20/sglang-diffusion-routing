@@ -69,16 +69,6 @@ class DiffusionRouter:
         )
 
     async def _start_background_health_check(self) -> None:
-        # Probe video capability for pre-registered workers in the running event loop.
-        unknown_workers = [
-            url for url, support in self.worker_video_support.items() if support is None
-        ]
-        if unknown_workers:
-            await asyncio.gather(
-                *(self.refresh_worker_video_support(url) for url in unknown_workers),
-                return_exceptions=True,
-            )
-
         if self._health_task is None or self._health_task.done():
             self._health_task = asyncio.create_task(self._health_check_loop())
 
@@ -393,12 +383,6 @@ class DiffusionRouter:
 
     async def generate_video(self, request: Request):
         """Route video generation to /v1/videos."""
-        if not self.worker_request_counts:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "No workers registered in the pool"},
-            )
-
         candidate_workers = [
             worker_url
             for worker_url, support in self.worker_video_support.items()

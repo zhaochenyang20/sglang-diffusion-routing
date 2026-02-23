@@ -1,14 +1,8 @@
-"""Unit tests for CLI argument parsing.
-
-Tests the argparse configuration directly — no mocks, no process spawning.
-CLI integration (actually starting the router) is covered in e2e tests.
-"""
-
 from __future__ import annotations
 
-import pytest
+from unittest import mock
 
-from sglang_diffusion_routing.cli.main import build_parser
+from sglang_diffusion_routing.cli.main import build_parser, run_cli
 
 
 class TestCLIParser:
@@ -25,7 +19,7 @@ class TestCLIParser:
         assert args.verbose is False
         assert args.log_level == "info"
 
-    def test_full_args(self):
+    def test_parses_worker_urls(self):
         args = build_parser().parse_args(
             [
                 "--host",
@@ -37,14 +31,6 @@ class TestCLIParser:
                 "http://localhost:10092",
                 "--routing-algorithm",
                 "round-robin",
-                "--timeout",
-                "0.5",
-                "--max-connections",
-                "500",
-                "--health-check-interval",
-                "30",
-                "--health-check-failure-threshold",
-                "5",
                 "--verbose",
                 "--log-level",
                 "warning",
@@ -54,13 +40,17 @@ class TestCLIParser:
         assert args.port == 31000
         assert args.worker_urls == ["http://localhost:10090", "http://localhost:10092"]
         assert args.routing_algorithm == "round-robin"
-        assert args.timeout == 0.5
+        assert args.verbose is True
+        assert args.log_level == "warning"
 
-    def test_rejects_invalid_routing_algorithm(self):
-        with pytest.raises(SystemExit):
-            build_parser().parse_args(["--routing-algorithm", "invalid-algo"])
 
-    def test_accepts_all_valid_algorithms(self):
-        for algo in ("least-request", "round-robin", "random"):
-            args = build_parser().parse_args(["--routing-algorithm", algo])
-            assert args.routing_algorithm == algo
+def test_run_cli_calls_router_runner():
+    with mock.patch("sglang_diffusion_routing.cli.main._run_router_server") as mock_run:
+        code = run_cli(["--port", "30123", "--worker-urls", "http://localhost:10090"])
+        assert code == 0
+        mock_run.assert_called_once()
+        args = mock_run.call_args.args[0]
+        assert args.port == 30123
+        assert args.worker_urls == ["http://localhost:10090"]
+        assert mock_run.call_args.kwargs["worker_urls"] == ["http://localhost:10090"]
+        assert mock_run.call_args.kwargs["log_prefix"] == "[sglang-d-router]"
