@@ -26,18 +26,30 @@ class TestCLIParser:
         assert args.log_level == "info"
 
     def test_full_args(self):
-        args = build_parser().parse_args([
-            "--host", "127.0.0.1",
-            "--port", "31000",
-            "--worker-urls", "http://localhost:10090", "http://localhost:10092",
-            "--routing-algorithm", "round-robin",
-            "--timeout", "0.5",
-            "--max-connections", "500",
-            "--health-check-interval", "30",
-            "--health-check-failure-threshold", "5",
-            "--verbose",
-            "--log-level", "warning",
-        ])
+        args = build_parser().parse_args(
+            [
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "31000",
+                "--worker-urls",
+                "http://localhost:10090",
+                "http://localhost:10092",
+                "--routing-algorithm",
+                "round-robin",
+                "--timeout",
+                "0.5",
+                "--max-connections",
+                "500",
+                "--health-check-interval",
+                "30",
+                "--health-check-failure-threshold",
+                "5",
+                "--verbose",
+                "--log-level",
+                "warning",
+            ]
+        )
         assert args.host == "127.0.0.1"
         assert args.port == 31000
         assert args.worker_urls == ["http://localhost:10090", "http://localhost:10092"]

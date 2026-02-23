@@ -1,5 +1,5 @@
 """
-End-to-end tests with real processes.
+CPU-only fake end-to-end tests with real processes.
 
 Spins up fake worker processes and a real router process, then sends
 real HTTP requests through the full stack:
@@ -9,7 +9,7 @@ real HTTP requests through the full stack:
 No mocks, no monkey-patching. All communication over real TCP sockets.
 
 Run:
-    pytest tests/e2e/ -v -s
+    pytest tests/unit/test_fake_e2e.py -v -s
 """
 
 from __future__ import annotations

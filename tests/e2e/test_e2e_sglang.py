@@ -12,9 +12,9 @@ To run explicitly:
     pytest tests/e2e/test_e2e_sglang.py -v -s
 
 Override model/GPU config via environment variables:
-    SGLANG_TEST_MODEL       Model path (default: stabilityai/stable-diffusion-3-medium-diffusers)
+    SGLANG_TEST_MODEL       Model path (default: Qwen/Qwen-Image)
     SGLANG_TEST_NUM_GPUS    GPUs per worker (default: 1)
-    SGLANG_TEST_NUM_WORKERS Number of workers (default: 1)
+    SGLANG_TEST_NUM_WORKERS Number of workers (default: 2)
     SGLANG_TEST_TIMEOUT     Startup timeout in seconds (default: 600)
 """
 
@@ -36,15 +36,16 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON = sys.executable
 
-DEFAULT_MODEL = "stabilityai/stable-diffusion-3-medium-diffusers"
+DEFAULT_MODEL = "Qwen/Qwen-Image"
 DEFAULT_NUM_GPUS = 1
-DEFAULT_NUM_WORKERS = 1
+DEFAULT_NUM_WORKERS = 2
 DEFAULT_TIMEOUT = 600  # sglang model loading can be slow
 
 
 def _has_sglang() -> bool:
     try:
         import sglang  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -53,6 +54,7 @@ def _has_sglang() -> bool:
 def _gpu_count() -> int:
     try:
         import torch
+
         return torch.cuda.device_count()
     except Exception:
         return 0
@@ -76,8 +78,9 @@ def _env() -> dict[str, str]:
     return env
 
 
-def _wait_healthy(url: str, timeout: float, label: str = "",
-                  proc: subprocess.Popen | None = None) -> None:
+def _wait_healthy(
+    url: str, timeout: float, label: str = "", proc: subprocess.Popen | None = None
+) -> None:
     deadline = time.monotonic() + timeout
     last_log = 0.0
     while time.monotonic() < deadline:
@@ -181,18 +184,28 @@ def sglang_workers(sglang_config):
         worker_env["CUDA_VISIBLE_DEVICES"] = gpu_ids
 
         cmd = [
-            "sglang", "serve",
-            "--model-path", sglang_config["model"],
-            "--num-gpus", str(sglang_config["num_gpus"]),
-            "--host", "127.0.0.1",
-            "--port", str(port),
+            "sglang",
+            "serve",
+            "--model-path",
+            sglang_config["model"],
+            "--num-gpus",
+            str(sglang_config["num_gpus"]),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
         ]
 
-        print(f"\n[sglang-test] Starting worker {i} on port {port} (GPU: {gpu_ids})",
-              flush=True)
+        print(
+            f"\n[sglang-test] Starting worker {i} on port {port} (GPU: {gpu_ids})",
+            flush=True,
+        )
         proc = subprocess.Popen(
-            cmd, env=worker_env, start_new_session=True,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            cmd,
+            env=worker_env,
+            start_new_session=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
         procs.append(proc)
         workers.append(SglangWorker(proc, f"http://127.0.0.1:{port}"))
@@ -200,8 +213,10 @@ def sglang_workers(sglang_config):
     try:
         for w in workers:
             _wait_healthy(
-                w.url, sglang_config["timeout"],
-                label=f"sglang worker {w.url}", proc=w.proc,
+                w.url,
+                sglang_config["timeout"],
+                label=f"sglang worker {w.url}",
+                proc=w.proc,
             )
     except (RuntimeError, TimeoutError) as exc:
         # Collect stderr from the first failed worker for diagnostics
@@ -209,7 +224,9 @@ def sglang_workers(sglang_config):
         for p in procs:
             if p.poll() is not None and p.stderr:
                 try:
-                    stderr_snippet = p.stderr.read(2048).decode("utf-8", errors="replace")
+                    stderr_snippet = p.stderr.read(2048).decode(
+                        "utf-8", errors="replace"
+                    )
                 except Exception:
                     pass
                 if stderr_snippet:
@@ -233,15 +250,26 @@ def router_url(sglang_workers):
     port = _find_free_port()
     worker_urls = [w.url for w in sglang_workers]
     cmd = [
-        PYTHON, "-m", "sglang_diffusion_routing",
-        "--host", "127.0.0.1", "--port", str(port),
-        "--worker-urls", *worker_urls,
-        "--routing-algorithm", "least-request",
-        "--log-level", "warning",
+        PYTHON,
+        "-m",
+        "sglang_diffusion_routing",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--worker-urls",
+        *worker_urls,
+        "--routing-algorithm",
+        "least-request",
+        "--log-level",
+        "warning",
     ]
     proc = subprocess.Popen(
-        cmd, env=_env(), start_new_session=True,
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        cmd,
+        env=_env(),
+        start_new_session=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
     url = f"http://127.0.0.1:{port}"
     try:
@@ -355,3 +383,17 @@ class TestSglangProxy:
         r = httpx.get(f"{router_url}/get_model_info", timeout=30.0)
         # sglang workers expose /get_model_info
         assert r.status_code in (200, 404)
+
+
+class TestSglangVideoEndpoint:
+    def test_generate_video_rejects_image_only_workers(self, router_url):
+        """Image-only workers (e.g. Qwen/Qwen-Image) should return 400 for /generate_video."""
+        r = httpx.post(
+            f"{router_url}/generate_video",
+            json={"prompt": "a walking cat", "num_frames": 8},
+            timeout=10.0,
+        )
+        assert r.status_code == 400
+        body = r.json()
+        assert "error" in body
+        assert body["error"]  # non-empty error message
