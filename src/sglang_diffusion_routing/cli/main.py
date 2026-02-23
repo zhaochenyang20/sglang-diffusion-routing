@@ -106,8 +106,6 @@ def _add_router_args(parser: argparse.ArgumentParser) -> None:
         help="YAML config for launching router managed workers (see examples/local_launcher.yaml).",
     )
 
-
-
 def _handle_router(args: argparse.Namespace) -> int:
     log_prefix = "[sglang-d-router]"
     backend = None

@@ -117,6 +117,38 @@ print(resp.json())
 ```
 
 ### With Curl
+3. Or start empty and add workers later:
+
+```bash
+sglang-d-router --port 30081
+curl -X POST "http://localhost:30081/add_worker?url=http://localhost:30000"
+```
+
+### Auto-launch workers via YAML config
+
+Instead of starting workers manually, you can let the router spawn and manage
+them through a launcher backend.
+
+**Local subprocess launcher** (`examples/local_launcher.yaml`):
+
+```bash
+sglang-d-router --port 30081 --launcher-config examples/local_launcher.yaml
+```
+
+```yaml
+launcher:
+  backend: local
+  model: Qwen/Qwen-Image
+  num_workers: 2
+  num_gpus_per_worker: 1
+  worker_base_port: 10090
+  wait_timeout: 600
+```
+
+Fields not set in the YAML fall back to defaults defined in each backend's
+config dataclass (see `LocalLauncherConfig`).
+
+### Test the router
 
 ```bash
 # Check router health
@@ -155,7 +187,71 @@ print('Saved to output.png')
 
 curl -X POST http://localhost:30081/update_weights_from_disk \
     -H "Content-Type: application/json" \
-    -d '{"model_path": "Qwen/Qwen-Image-2512"}'
+    -d '{"model_path": "/path/to/new/weights"}'
+```
+
+Response shape:
+
+```json
+{
+  "results": [
+    {
+      "worker_url": "http://localhost:30000",
+      "status_code": 200,
+      "body": {
+        "ok": true
+      }
+    }
+  ]
+}
+```
+
+## Benchmark Scripts
+
+Benchmark scripts are available under `tests/benchmarks/diffusion_router/` and are intended for manual runs.
+They are not part of default unit test collection (`pytest tests/unit -v`).
+
+Single benchmark:
+
+```bash
+SGLANG_USE_MODELSCOPE=TRUE python tests/benchmarks/diffusion_router/bench_router.py \
+    --model Qwen/Qwen-Image \
+    --num-workers 2 \
+    --num-prompts 20 \
+    --max-concurrency 4
+```
+
+Algorithm comparison:
+
+```bash
+SGLANG_USE_MODELSCOPE=TRUE python tests/benchmarks/diffusion_router/bench_routing_algorithms.py \
+    --model Qwen/Qwen-Image \
+    --num-workers 2 \
+    --num-prompts 20 \
+    --max-concurrency 4
+```
+
+## Project Layout
+
+```text
+.
+├── docs/
+│   └── update_weights_from_disk.md
+├── examples/
+│   ├── local_launcher.yaml
+│   └── ray_launcher.yaml
+├── src/sglang_diffusion_routing/
+│   ├── cli/
+│   ├── launcher/          # local / ray backend implementations
+│   └── router/
+├── tests/
+│   ├── benchmarks/
+│   │   └── diffusion_router/
+│   │       ├── bench_router.py
+│   │       └── bench_routing_algorithms.py
+│   └── unit/
+├── pyproject.toml
+└── README.md
 ```
 
 ## Acknowledgment

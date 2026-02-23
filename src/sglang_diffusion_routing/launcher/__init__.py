@@ -1,8 +1,7 @@
 """Launcher backends for spinning up SGLang diffusion workers.
 
-Right now only local subprocesses are supported. The backend interface
-is meant to be extended for other deployment strategies (Kubernetes,
-Ray, etc.) down the road.
+Supported backends:
+- ``local``: launch workers as local subprocesses.
 """
 
 from sglang_diffusion_routing.launcher.backend import (
