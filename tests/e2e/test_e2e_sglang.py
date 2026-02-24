@@ -156,7 +156,10 @@ def _looks_like_supported_image_bytes(img_bytes: bytes) -> bool:
         return True
     if img_bytes.startswith(_JPEG_SIGNATURE):
         return True
-    if img_bytes.startswith(_WEBP_RIFF_SIGNATURE) and img_bytes[8:12] == _WEBP_FORMAT_MARKER:
+    if (
+        img_bytes.startswith(_WEBP_RIFF_SIGNATURE)
+        and img_bytes[8:12] == _WEBP_FORMAT_MARKER
+    ):
         return True
     return False
 
@@ -272,7 +275,9 @@ def sglang_workers(sglang_config):
             if worker_errors
             else "worker process exited but no stderr captured."
         )
-        pytest.fail(f"sglang worker failed during startup: {exc}\n{details}", pytrace=False)
+        pytest.fail(
+            f"sglang worker failed during startup: {exc}\n{details}", pytrace=False
+        )
     except TimeoutError as exc:
         worker_errors = _collect_exited_worker_errors(procs)
         for p in procs:
@@ -396,7 +401,9 @@ class TestSglangImageGeneration:
 
         # Some real workers/models do not support n>1 yet.
         assert r.status_code in (400, 500)
-        error_body = r.json() if "application/json" in r.headers.get("content-type", "") else {}
+        error_body = (
+            r.json() if "application/json" in r.headers.get("content-type", "") else {}
+        )
         if isinstance(error_body, dict):
             assert error_body.get("error") or error_body.get("detail") or r.text
 
