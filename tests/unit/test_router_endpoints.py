@@ -67,26 +67,16 @@ def test_generate_routes_only_to_image_workers():
     assert captured["worker_urls"] == ["http://image-worker:8000"]
 
 
-def test_generate_includes_unknown_workers():
+def test_generate_returns_400_when_only_unknown_workers():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://unknown-worker:8000")
-    router.register_worker("http://video-worker:8000")
     router.worker_video_support["http://unknown-worker:8000"] = None
-    router.worker_video_support["http://video-worker:8000"] = True
 
-    captured = {}
-
-    async def fake_forward(request, path, worker_urls=None):
-        captured["worker_urls"] = worker_urls
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(content={"ok": True})
-
-    router._forward_to_worker = fake_forward  # type: ignore[assignment]
     with TestClient(router.app) as client:
-        client.post("/generate", json={"prompt": "a cat"})
+        response = client.post("/generate", json={"prompt": "a cat"})
 
-    assert captured["worker_urls"] == ["http://unknown-worker:8000"]
+    assert response.status_code == 400
+    assert "image-capable" in response.json()["error"]
 
 
 def test_generate_returns_400_when_only_video_workers():

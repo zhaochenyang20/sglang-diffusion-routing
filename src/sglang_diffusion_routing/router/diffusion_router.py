@@ -382,7 +382,7 @@ class DiffusionRouter:
         candidate_workers = [
             worker_url
             for worker_url, support in self.worker_video_support.items()
-            if not support
+            if support is not None and not support
         ]
 
         if not candidate_workers:
