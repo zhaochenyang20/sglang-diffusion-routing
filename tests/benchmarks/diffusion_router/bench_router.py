@@ -25,6 +25,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import httpx
+import torch
 
 
 def _repo_root() -> Path:
@@ -131,15 +132,6 @@ def _parse_gpu_id_list(raw: str) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _detect_gpu_count() -> int:
-    try:
-        import torch
-
-        return int(torch.cuda.device_count())
-    except Exception:
-        return 0
-
-
 def _resolve_gpu_pool(
     args: argparse.Namespace, env: dict[str, str]
 ) -> list[str] | None:
@@ -152,7 +144,7 @@ def _resolve_gpu_pool(
         if parsed:
             return parsed
 
-    gpu_count = _detect_gpu_count()
+    gpu_count = int(torch.cuda.device_count())
     if gpu_count > 0:
         return [str(i) for i in range(gpu_count)]
     return None

@@ -1,0 +1,11 @@
+launcher:
+  model: Qwen/Qwen-Image
+
+  num_workers: 8
+  num_gpus_per_worker: 1
+  worker_host: "127.0.0.1"
+  worker_base_port: 10090
+
+  worker_extra_args: "--dit-cpu-offload false --text-encoder-cpu-offload false"
+
+  wait_timeout: 600
