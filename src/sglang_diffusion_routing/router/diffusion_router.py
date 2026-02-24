@@ -379,7 +379,22 @@ class DiffusionRouter:
 
     async def generate(self, request: Request):
         """Route image generation to /v1/images/generations."""
-        return await self._forward_to_worker(request, "v1/images/generations")
+        candidate_workers = [
+            worker_url
+            for worker_url, support in self.worker_video_support.items()
+            if not support
+        ]
+
+        if not candidate_workers:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "error": "No image-capable workers available in current worker pool.",
+                },
+            )
+        return await self._forward_to_worker(
+            request, "v1/images/generations", worker_urls=candidate_workers
+        )
 
     async def generate_video(self, request: Request):
         """Route video generation to /v1/videos."""
@@ -426,6 +441,7 @@ class DiffusionRouter:
                     "active_requests": count,
                     "is_dead": url in self.dead_workers,
                     "consecutive_failures": self.worker_failure_counts.get(url, 0),
+                    "video_support": self.worker_video_support.get(url),
                 }
             )
         return JSONResponse(content={"workers": workers})
