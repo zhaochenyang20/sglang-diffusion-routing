@@ -10,7 +10,11 @@ Run CPU only tests:
 
 ```bash
 pip install pytest
+# CPU-only tests (unit + fake e2e)
 pytest tests/unit -v
+
+# Real E2E tests (GPU required, longer runtime)
+pytest tests/e2e/test_e2e_sglang.py -v -s
 ```
 
 ## Benchmark Scripts
