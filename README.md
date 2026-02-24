@@ -8,7 +8,7 @@ It provides worker registration, load balancing, health checking, refit weights 
 
 ## Table of Contents
 
-- [Overview](#Overview)
+- [Overview](#overview)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
   - [Start diffusion workers](#start-diffusion-workers)
@@ -18,7 +18,7 @@ It provides worker registration, load balancing, health checking, refit weights 
   - [Videos Result Query](#videos-result-query)
   - [Model Discovery and Health Checks](#model-discovery-and-health-checks)
   - [Worker Management APIs](#worker-management-apis)
-  - [Optional (business-dependent)](#optional-business-dependent)
+  - [RL Related API](#rl-related-api)
 - [Acknowledgment](#acknowledgment)
 
 ---
@@ -209,7 +209,7 @@ curl -X POST http://localhost:30081/v1/videos \
     -d '{"model": "Qwen/Qwen-Image", "prompt": "a flowing river"}'
 
 # Poll a specific video job by video_id
-curl http://localhost:30081/v1/videos/<video_id>
+curl http://localhost:30081/v1/videos/{video_id}
 
 
 curl -X POST http://localhost:30081/update_weights_from_disk \
@@ -263,11 +263,11 @@ Video query routing is stable by `video_id`: router caches `video_id -> worker` 
 - `is_dead` (boolean): quarantine (`true`) or recover (`false`) this worker.
 - `refresh_video_support` (boolean): re-probe worker `/v1/models` capability.
 
-### Optional (business-dependent)
+### RL Related API
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/update_weights_from_disk` | Reload weights from disk (ops/admin use) |
+| `POST` | `/update_weights_from_disk` | Reload weights from disk on all healthy workers |
 
 ---
 

@@ -327,3 +327,14 @@ def test_update_weights_from_disk_returns_broadcast_results():
         response = client.post("/update_weights_from_disk", json={"model_path": "abc"})
         assert response.status_code == 200
         assert response.json()["results"][0]["status_code"] == 200
+
+
+def test_update_weights_from_disk_returns_503_without_healthy_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://localhost:10090")
+    router.dead_workers.add("http://localhost:10090")
+
+    with TestClient(router.app) as client:
+        response = client.post("/update_weights_from_disk", json={"model_path": "abc"})
+        assert response.status_code == 503
+        assert "No healthy workers available" in response.json()["error"]

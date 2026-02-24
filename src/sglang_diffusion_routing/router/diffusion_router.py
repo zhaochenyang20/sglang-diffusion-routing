@@ -61,9 +61,11 @@ class DiffusionRouter:
     def _setup_routes(self) -> None:
         self.app.post("/workers")(self.create_worker)
         self.app.get("/workers")(self.get_workers)
-        self.app.get("/workers/{worker_id}")(self.get_worker)
-        self.app.put("/workers/{worker_id}")(self.update_worker)
-        self.app.delete("/workers/{worker_id}")(self.delete_worker)
+        # worker_id is a URL-encoded worker URL; decoded value can contain "/".
+        # Use :path converter so encoded slashes still resolve to this route.
+        self.app.get("/workers/{worker_id:path}")(self.get_worker)
+        self.app.put("/workers/{worker_id:path}")(self.update_worker)
+        self.app.delete("/workers/{worker_id:path}")(self.delete_worker)
         self.app.post("/v1/images/generations")(self.generate)
         self.app.post("/v1/videos")(self.generate_video)
         self.app.get("/v1/videos")(self.list_or_poll_videos)
@@ -670,6 +672,15 @@ class DiffusionRouter:
 
     async def update_weights_from_disk(self, request: Request):
         """Broadcast weight reload to all healthy workers."""
+        healthy_workers = [
+            url for url in self.worker_request_counts if url not in self.dead_workers
+        ]
+        if not healthy_workers:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "No healthy workers available in the pool"},
+            )
+
         body = await request.body()
         headers = dict(request.headers)
         results = await self._broadcast_to_workers(
