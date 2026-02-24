@@ -45,6 +45,52 @@ def test_add_worker_rejects_blocked_metadata_host():
         assert "blocked" in response.json()["error"]
 
 
+def test_generate_routes_only_to_image_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://image-worker:8000")
+    router.register_worker("http://video-worker:8000")
+    router.worker_video_support["http://image-worker:8000"] = False
+    router.worker_video_support["http://video-worker:8000"] = True
+
+    captured = {}
+
+    async def fake_forward(request, path, worker_urls=None):
+        captured["worker_urls"] = worker_urls
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(content={"ok": True})
+
+    router._forward_to_worker = fake_forward  # type: ignore[assignment]
+    with TestClient(router.app) as client:
+        client.post("/generate", json={"prompt": "a cat"})
+
+    assert captured["worker_urls"] == ["http://image-worker:8000"]
+
+
+def test_generate_returns_400_when_only_unknown_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://unknown-worker:8000")
+    router.worker_video_support["http://unknown-worker:8000"] = None
+
+    with TestClient(router.app) as client:
+        response = client.post("/generate", json={"prompt": "a cat"})
+
+    assert response.status_code == 400
+    assert "image-capable" in response.json()["error"]
+
+
+def test_generate_returns_400_when_only_video_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://video-worker:8000")
+    router.worker_video_support["http://video-worker:8000"] = True
+
+    with TestClient(router.app) as client:
+        response = client.post("/generate", json={"prompt": "a cat"})
+
+    assert response.status_code == 400
+    assert "image-capable" in response.json()["error"]
+
+
 def test_update_weights_from_disk_returns_broadcast_results():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")

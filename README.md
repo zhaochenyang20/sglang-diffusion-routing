@@ -74,7 +74,7 @@ CUDA_VISIBLE_DEVICES=0 sglang serve \
 
 # worker 2
 CUDA_VISIBLE_DEVICES=1 sglang serve \
-    --model-path Qwen/Qwen-Image \
+    --model-path Wan-AI/Wan2.1-T2V-1.3B-Diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30002
@@ -95,13 +95,15 @@ ROUTER = "http://localhost:30081"
 
 # Check router health
 resp = requests.get(f"{ROUTER}/health")
+# {'status': 'healthy', 'healthy_workers': 2, 'total_workers': 2}
 print(resp.json())
 
 # List registered workers
 resp = requests.get(f"{ROUTER}/list_workers")
+# {'urls': ['http://localhost:30000', 'http://localhost:30002']}
 print(resp.json())
 
-# Image generation request (returns base64-encoded image)
+# Image generation request (image will be saved to outputs/)
 resp = requests.post(f"{ROUTER}/generate", json={
     "model": "Qwen/Qwen-Image",
     "prompt": "a cute cat",
@@ -109,23 +111,27 @@ resp = requests.post(f"{ROUTER}/generate", json={
     "response_format": "b64_json",
 })
 data = resp.json()
-print(data)
+# dict_keys(['id', 'created', 'data', 'peak_memory_mb', 'inference_time_s'])
+print(data.keys())
 
-# Decode and save the image locally
-img = base64.b64decode(data["data"][0]["b64_json"])
-with open("output.png", "wb") as f:
-    f.write(img)
-print("Saved to output.png")
-
+# Video generation request (Video will be saved to outputs/)
+resp = requests.post(f"{ROUTER}/generate_video", json={
+    "model": "Wan-AI/Wan2.1-T2V-1.3B-Diffusers",
+    "prompt": "a flowing river",
+})
+# {'id': '8286716d-7ef9-43ce-a3af-ce443543d221', 'object': 'video', 'model': 'Wan-AI/Wan2.1-T2V-1.3B-Diffusers', 'status': 'queued', 'progress': 0, 'created_at': 1771877888, 'size': '832x480', 'seconds': '6', 'quality': 'standard', 'url': None, 'remixed_from_video_id': None, 'completed_at': None, 'expires_at': None, 'error': None, 'file_path': './sglang-diffusion-routing/outputs/8286716d-7ef9-43ce-a3af-ce443543d221.mp4', 'peak_memory_mb': None, 'inference_time_s': None}
+print(resp.json())
 
 # Check per-worker health and load
 resp = requests.get(f"{ROUTER}/health_workers")
+# {'workers': [{'url': 'http://localhost:30000', 'active_requests': 0, 'is_dead': False, 'consecutive_failures': 0, 'video_support': False}, {'url': 'http://localhost:30002', 'active_requests': 0, 'is_dead': False, 'consecutive_failures': 0, 'video_support': True}]}
 print(resp.json())
 
 # Update weights from disk
 resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
     "model_path": "Qwen/Qwen-Image-2512",
 })
+# {'results': [{'worker_url': 'http://localhost:30000', 'status_code': 200, 'body': {'success': True, 'message': 'Updated 3 modules (text_encoder, vae, transformer).'}}, {'worker_url': 'http://localhost:30002', 'status_code': 502, 'body': {'error': ''}}]}
 print(resp.json())
 ```
 
