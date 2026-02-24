@@ -105,14 +105,14 @@ print(resp.json())
 
 # Check per-worker health and load
 resp = requests.get(f"{ROUTER}/health_workers")
-# {'workers': [{'url': 'http://localhost:30000', 'active_requests': 0, 'is_dead': False, 'consecutive_failures': 0}, {'url': 'http://localhost:30002', 'active_requests': 0, 'is_dead': False, 'consecutive_failures': 0}]}
+# {'workers': [{'url': 'http://localhost:30000', 'active_requests': 0, 'is_dead': False, 'consecutive_failures': 0, 'video_support': False}, {'url': 'http://localhost:30002', 'active_requests': 0, 'is_dead': False, 'consecutive_failures': 0, 'video_support': True}]}
 print(resp.json())
 
 # Update weights from disk
 resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
     "model_path": "Qwen/Qwen-Image-2512",
 })
-# {'results': [{'worker_url': 'http://localhost:30000', 'status_code': 200, 'body': {'success': True, 'message': 'Updated 3 modules (text_encoder, vae, transformer).'}}]}
+# {'results': [{'worker_url': 'http://localhost:30000', 'status_code': 200, 'body': {'success': True, 'message': 'Updated 3 modules (text_encoder, vae, transformer).'}}, {'worker_url': 'http://localhost:30002', 'status_code': 502, 'body': {'error': ''}}]}
 print(resp.json())
 ```
 
