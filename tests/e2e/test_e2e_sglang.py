@@ -24,8 +24,6 @@ from __future__ import annotations
 import base64
 import os
 import shutil
-import signal
-import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -33,7 +31,13 @@ from pathlib import Path
 import httpx
 import pytest
 
-from sglang_diffusion_routing.launcher.utils import wait_for_health
+from sglang_diffusion_routing.launcher.utils import (
+    build_gpu_assignments,
+    reserve_available_port,
+    resolve_gpu_pool,
+    terminate_all,
+    wait_for_health,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON = sys.executable
@@ -59,22 +63,19 @@ def _has_sglang() -> bool:
 
 
 def _gpu_count() -> int:
-    try:
-        import torch
-
-        return torch.cuda.device_count()
-    except Exception:
-        return 0
+    gpu_pool = resolve_gpu_pool(worker_gpu_ids=None, env=os.environ)
+    return len(gpu_pool) if gpu_pool else 0
 
 
 def _get_env(key: str, default: str) -> str:
     return os.environ.get(key, default)
 
 
-def _find_free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+_USED_PORTS: set[int] = set()
+
+
+def _reserve_local_port(preferred_port: int) -> int:
+    return reserve_available_port("127.0.0.1", preferred_port, _USED_PORTS)
 
 
 def _env() -> dict[str, str]:
@@ -95,23 +96,6 @@ def _wait_healthy(
         proc=proc,
         log_prefix="[sglang-test]",
     )
-
-
-def _kill_proc(proc: subprocess.Popen) -> None:
-    if proc.poll() is not None:
-        return
-    try:
-        os.killpg(proc.pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError):
-        pass
-    try:
-        proc.wait(timeout=15)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-        proc.wait(timeout=5)
 
 
 def _read_stderr_snippet(proc: subprocess.Popen, max_bytes: int = 8192) -> str:
@@ -205,13 +189,18 @@ def sglang_workers(sglang_config):
     workers = []
     procs = []
     env = _env()
-    gpu_pool = list(range(_gpu_count()))
+    gpu_assignments = build_gpu_assignments(
+        worker_gpu_ids=None,
+        num_workers=sglang_config["num_workers"],
+        num_gpus_per_worker=sglang_config["num_gpus"],
+        env=env,
+    )
+    if gpu_assignments is None:
+        pytest.skip("No GPU assignments available")
 
     for i in range(sglang_config["num_workers"]):
-        port = _find_free_port()
-        gpu_start = i * sglang_config["num_gpus"]
-        gpu_end = gpu_start + sglang_config["num_gpus"]
-        gpu_ids = ",".join(str(gpu_pool[g]) for g in range(gpu_start, gpu_end))
+        port = _reserve_local_port(10090 + i * 2)
+        gpu_ids = gpu_assignments[i]
 
         worker_env = dict(env)
         worker_env["CUDA_VISIBLE_DEVICES"] = gpu_ids
@@ -257,8 +246,7 @@ def sglang_workers(sglang_config):
             )
     except RuntimeError as exc:
         worker_errors = _collect_exited_worker_errors(procs)
-        for p in procs:
-            _kill_proc(p)
+        terminate_all(procs)
         details = (
             "\n\n".join(worker_errors)
             if worker_errors
@@ -269,8 +257,7 @@ def sglang_workers(sglang_config):
         )
     except TimeoutError as exc:
         worker_errors = _collect_exited_worker_errors(procs)
-        for p in procs:
-            _kill_proc(p)
+        terminate_all(procs)
         if worker_errors:
             details = "\n\n".join(worker_errors)
             pytest.fail(
@@ -281,8 +268,7 @@ def sglang_workers(sglang_config):
 
     exited_after_ready = _collect_exited_worker_errors(procs)
     if exited_after_ready:
-        for p in procs:
-            _kill_proc(p)
+        terminate_all(procs)
         pytest.fail(
             "sglang worker exited after becoming healthy:\n"
             + "\n\n".join(exited_after_ready),
@@ -291,14 +277,13 @@ def sglang_workers(sglang_config):
 
     yield workers
 
-    for p in procs:
-        _kill_proc(p)
+    terminate_all(procs)
 
 
 @pytest.fixture(scope="module")
 def router_url(sglang_workers):
     """Launch a real router connected to real sglang workers."""
-    port = _find_free_port()
+    port = _reserve_local_port(12090)
     worker_urls = [w.url for w in sglang_workers]
     cmd = [
         PYTHON,
@@ -326,11 +311,11 @@ def router_url(sglang_workers):
     try:
         _wait_healthy(url, 30, label="router", proc=proc)
     except Exception:
-        _kill_proc(proc)
+        terminate_all([proc])
         raise
 
     yield url
-    _kill_proc(proc)
+    terminate_all([proc])
 
 
 # -- Tests ------------------------------------------------------------------
