@@ -86,6 +86,16 @@ class DiffusionRouter:
         )
 
     async def _start_background_health_check(self) -> None:
+        # Probe capability for pre-registered workers in the active server loop.
+        unknown_workers = [
+            url for url, support in self.worker_video_support.items() if support is None
+        ]
+        if unknown_workers:
+            await asyncio.gather(
+                *(self.refresh_worker_video_support(url) for url in unknown_workers),
+                return_exceptions=True,
+            )
+
         if self._health_task is None or self._health_task.done():
             self._health_task = asyncio.create_task(self._health_check_loop())
 
