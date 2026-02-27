@@ -38,7 +38,7 @@ class DiffusionRouter:
         self.worker_video_support: dict[str, bool | None] = {}
         # quarantined workers excluded from routing
         self.dead_workers: set[str] = set()
-        # record workers in sleeping status 
+        # record workers in sleeping status
         self.sleeping_workers: set[str] = set()
         # video_id -> worker URL mapping for stable query routing
         self.video_job_to_worker: dict[str, str] = {}
@@ -724,14 +724,15 @@ class DiffusionRouter:
         headers.pop("content-length", None)
         headers.setdefault("content-type", "application/json")
 
-        results = await self._broadcast_to_workers("release_memory_occupation", body, headers)
+        results = await self._broadcast_to_workers(
+            "release_memory_occupation", body, headers
+        )
 
         for item in results:
             if item.get("status_code") == 200:
                 self.sleeping_workers.add(item["worker_url"])
 
         return JSONResponse(content={"results": results})
-
 
     async def resume_memory_occupation(self, request: Request):
         """Broadcast wake to all healthy workers and unmark sleeping on success."""
@@ -748,7 +749,9 @@ class DiffusionRouter:
         headers.pop("content-length", None)
         headers.setdefault("content-type", "application/json")
 
-        results = await self._broadcast_to_workers("resume_memory_occupation", body, headers)
+        results = await self._broadcast_to_workers(
+            "resume_memory_occupation", body, headers
+        )
 
         for item in results:
             if item.get("status_code") == 200:
