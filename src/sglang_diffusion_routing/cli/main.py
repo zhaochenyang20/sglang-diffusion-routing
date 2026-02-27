@@ -5,10 +5,53 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import sys
+from contextlib import suppress
 
 from sglang_diffusion_routing import DiffusionRouter
 from sglang_diffusion_routing.launcher import config as _lcfg
+
+
+def _print_fired_up_banner(log_prefix: str) -> None:
+    banner = r"""
+
+  ____   ____ _                      ____  _  __  __           _
+ / ___| / ___| |    __ _ _ __   __ _|  _ \(_)/ _|/ _|_   _ ___(_) ___  _ __
+ \___ \| |  _| |   / _` | '_ \ / _` | | | | | |_| |_| | | / __| |/ _ \| '_ \
+  ___) | |_| | |__| (_| | | | | (_| | |_| | |  _|  _| |_| \__ \ | (_) | | | |
+ |____/ \____|_____\__,_|_| |_|\__, |____/|_|_| |_|  \__,_|___/_|\___/|_| |_|
+                                |___/
+
+  ____             _            _____                _
+ |  _ \ ___  _   _| |_ ___ _ _ |  ___(_)_ __ ___  __| |   _   _ _ __
+ | |_) / _ \| | | | __/ _ \ '__| |_  | | '__/ _ \/ _` |  | | | | '_ \
+ |  _ < (_) | |_| | ||  __/ |  |  _| | | | |  __/ (_| |  | |_| | |_) |
+ |_| \_\___/ \__,_|\__\___|_|  |_|   |_|_|  \___|\__,_|  |\__,_| .__/
+                                                               |_|
+
+"""
+    use_color = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+    if not use_color:
+        print(f"{log_prefix} {banner}", flush=True)
+        return
+
+    colors = [
+        "\033[38;5;45m",  # cyan
+        "\033[38;5;51m",  # bright cyan
+        "\033[38;5;123m",  # light cyan
+        "\033[38;5;159m",  # pale blue
+    ]
+    reset = "\033[0m"
+    colored_lines = []
+    for idx, line in enumerate(banner.splitlines()):
+        if line.strip():
+            color = colors[idx % len(colors)]
+            colored_lines.append(f"{color}{line}{reset}")
+        else:
+            colored_lines.append(line)
+    colored_banner = "\n".join(colored_lines)
+    print(f"{log_prefix} {colored_banner}", flush=True)
 
 
 def _run_router_server(
@@ -42,12 +85,34 @@ def _run_router_server(
         f"{log_prefix} workers: {list(router.worker_request_counts.keys()) or '(none - add via POST /workers)'}",
         flush=True,
     )
-    uvicorn.run(
-        router.app,
+    config = uvicorn.Config(
+        app=router.app,
         host=args.host,
         port=args.port,
         log_level=getattr(args, "log_level", "info"),
     )
+    server = uvicorn.Server(config)
+
+    async def _serve_with_banner() -> None:
+        banner_printed = False
+
+        async def _wait_and_print_banner() -> None:
+            nonlocal banner_printed
+            while not server.started and not server.should_exit:
+                await asyncio.sleep(0.1)
+            if server.started and not banner_printed:
+                banner_printed = True
+                _print_fired_up_banner(log_prefix)
+
+        watcher = asyncio.create_task(_wait_and_print_banner())
+        try:
+            await server.serve()
+        finally:
+            watcher.cancel()
+            with suppress(asyncio.CancelledError):
+                await watcher
+
+    asyncio.run(_serve_with_banner())
 
 
 def _add_router_args(parser: argparse.ArgumentParser) -> None:

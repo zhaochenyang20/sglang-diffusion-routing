@@ -1,10 +1,6 @@
 # SGLang Diffusion Router
 
-A lightweight router for SGLang diffusion workers used in RL systems.
-
-It provides worker registration, load balancing, health checking, refit weights and request proxying for diffusion generation APIs.
-
----
+A lightweight router for SGLang diffusion workers used in RL systems. It provides worker registration, load balancing, health checking, refit weights and request proxying for diffusion generation APIs.
 
 ## Table of Contents
 
@@ -21,11 +17,6 @@ It provides worker registration, load balancing, health checking, refit weights 
   - [RL Related API](#rl-related-api)
 - [Acknowledgment](#acknowledgment)
 
----
-
-## Overview
-
----
 
 ## Installation
 
@@ -51,11 +42,9 @@ uv pip install "sglang[diffusion]" --prerelease=allow
 cd ..
 ```
 
----
-
 ## Quick Start
 
-### Co-launch workers and router via YAML config
+### Co-Launch Workers and Router
 
 Instead of starting workers manually, you can let the router spawn and manage them via a YAML config file.
 
@@ -73,7 +62,7 @@ launcher:
   wait_timeout: 600
 ```
 
-### Manual Launch Workers and Connect to Router
+### Manual Launch Workers
 
 ```bash
 # If connect to HuggingFace is not allowed
