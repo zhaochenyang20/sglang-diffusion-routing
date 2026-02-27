@@ -258,7 +258,8 @@ Video query routing is stable by `video_id`: router caches `video_id -> worker` 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/update_weights_from_disk` | Reload weights from disk on all healthy workers |
-
+| `POST` | `/release_memory_occupation` | Broadcast sleep to all healthy workers (release GPU memory occupation) |
+| `POST` | `/resume_memory_occupation` | Broadcast wake to all healthy workers (resume GPU memory occupation) |
 
 ## Acknowledgment
 
