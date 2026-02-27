@@ -1,17 +1,18 @@
 """
 End-to-end tests with real sglang diffusion workers.
 
-Requires:
-    - sglang installed with diffusion support: pip install "sglang[diffusion]"
-    - At least 1 GPU available
-    - Model weights accessible (downloads on first run)
+Test logistics:
+    1) launch N real sglang worker processes
+    2) launch one router process wired to those workers
+    3) send real HTTP requests through the router
+    4) assert routing/proxy behavior and clean up all processes
 
-These tests are SKIPPED automatically when sglang or GPU is not available.
-To run explicitly:
+These tests are skipped automatically when sglang or GPU is unavailable.
+Run explicitly:
 
     pytest tests/e2e/test_e2e_sglang.py -v -s
 
-Override model/GPU config via environment variables:
+Environment overrides:
     SGLANG_TEST_MODEL       Model path (default: Qwen/Qwen-Image)
     SGLANG_TEST_NUM_GPUS    GPUs per worker (default: 1)
     SGLANG_TEST_NUM_WORKERS Number of workers (default: 2)
@@ -27,11 +28,12 @@ import signal
 import socket
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import httpx
 import pytest
+
+from sglang_diffusion_routing.launcher.utils import wait_for_health
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PYTHON = sys.executable
@@ -86,26 +88,13 @@ def _env() -> dict[str, str]:
 def _wait_healthy(
     url: str, timeout: float, label: str = "", proc: subprocess.Popen | None = None
 ) -> None:
-    deadline = time.monotonic() + timeout
-    last_log = 0.0
-    while time.monotonic() < deadline:
-        if proc is not None and proc.poll() is not None:
-            raise RuntimeError(
-                f"{label} process exited with code {proc.returncode} during startup"
-            )
-        try:
-            r = httpx.get(f"{url}/health", timeout=5.0)
-            if r.status_code == 200:
-                return
-        except httpx.HTTPError:
-            pass
-        now = time.monotonic()
-        if now - last_log >= 30:
-            elapsed = now - (deadline - timeout)
-            print(f"  Waiting for {label}... ({elapsed:.0f}s)", flush=True)
-            last_log = now
-        time.sleep(2)
-    raise TimeoutError(f"{label} at {url} not healthy within {timeout}s")
+    wait_for_health(
+        url=url,
+        timeout=max(1, int(timeout)),
+        label=label or url,
+        proc=proc,
+        log_prefix="[sglang-test]",
+    )
 
 
 def _kill_proc(proc: subprocess.Popen) -> None:
@@ -175,7 +164,7 @@ _skip_no_gpu = pytest.mark.skipif(
     reason="No GPU available",
 )
 
-pytestmark = [_skip_no_sglang, _skip_no_gpu]
+pytestmark = [pytest.mark.real_e2e, _skip_no_sglang, _skip_no_gpu]
 
 
 # -- Fixtures ---------------------------------------------------------------

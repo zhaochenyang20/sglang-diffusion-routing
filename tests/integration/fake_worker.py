@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Fake sglang diffusion worker for e2e testing.
+Fake sglang diffusion worker for integration testing.
 
 Implements the same HTTP API contract as a real sglang diffusion worker,
 but returns canned responses without any GPU or model dependencies.
 
 Usage:
-    python tests/unit/fake_worker.py --port 19000
-    python tests/unit/fake_worker.py --port 19000 --fail-rate 0.5
-    python tests/unit/fake_worker.py --port 19000 --latency 0.2
+    python tests/integration/fake_worker.py --port 19000
+    python tests/integration/fake_worker.py --port 19000 --fail-rate 0.5
+    python tests/integration/fake_worker.py --port 19000 --latency 0.2
 """
 
 from __future__ import annotations

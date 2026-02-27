@@ -40,5 +40,9 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit"]
+testpaths = ["tests/unit", "tests/integration"]
+markers = [
+    "integration: CPU-only integration tests with real processes.",
+    "real_e2e: Real e2e tests requiring sglang and GPU.",
+]
 pythonpath = ["src"]
