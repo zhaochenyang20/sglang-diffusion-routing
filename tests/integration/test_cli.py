@@ -10,13 +10,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from .common import (
-    PYTHON,
-    _env,
-    _find_free_port,
-    _kill_proc,
-    _wait_healthy,
-)
+from .common import PYTHON, _env, _find_free_port, _kill_proc, _wait_healthy
 
 pytestmark = pytest.mark.integration
 
