@@ -177,7 +177,9 @@ class DiffusionRouter:
             raise RuntimeError("No workers registered in the pool")
 
         valid_workers = [
-            w for w in self.worker_request_counts if w not in self.dead_workers
+            w
+            for w in self.worker_request_counts
+            if w not in self.dead_workers and w not in self.sleeping_workers
         ]
         if worker_urls is not None:
             allowed = {w for w in worker_urls if w in self.worker_request_counts}
