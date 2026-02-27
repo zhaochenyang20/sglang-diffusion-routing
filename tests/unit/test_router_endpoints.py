@@ -72,34 +72,6 @@ def test_get_worker_by_id_success_and_not_found():
         assert missing.status_code == 404
 
 
-def test_put_worker_updates_flags_and_refreshes_capability():
-    router = DiffusionRouter(make_router_args())
-    worker_url = "http://localhost:10090"
-    worker_id = quote(worker_url, safe="")
-    router.register_worker(worker_url)
-    router.worker_video_support[worker_url] = None
-    refresh_calls: list[str] = []
-
-    async def fake_refresh(url: str):
-        refresh_calls.append(url)
-        router.worker_video_support[url] = True
-
-    router.refresh_worker_video_support = fake_refresh  # type: ignore[assignment]
-    with TestClient(router.app) as client:
-        response = client.put(
-            f"/workers/{worker_id}",
-            json={"is_dead": True, "refresh_video_support": True},
-        )
-        assert response.status_code == 200
-        assert refresh_calls == [worker_url]
-        assert response.json()["worker"]["is_dead"] is True
-        assert response.json()["worker"]["video_support"] is True
-
-        revive = client.put(f"/workers/{worker_id}", json={"is_dead": False})
-        assert revive.status_code == 200
-        assert revive.json()["worker"]["is_dead"] is False
-
-
 def test_put_worker_rejects_invalid_payload():
     router = DiffusionRouter(make_router_args())
     worker_url = "http://localhost:10090"

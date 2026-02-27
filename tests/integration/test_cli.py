@@ -44,7 +44,7 @@ class TestCLI:
             _wait_healthy(url)
             assert httpx.get(f"{url}/health", timeout=5.0).status_code == 200
             r = httpx.post(
-                f"{url}/generate",
+                f"{url}/v1/images/generations",
                 json={"prompt": "cli", "response_format": "b64_json"},
                 timeout=10.0,
             )

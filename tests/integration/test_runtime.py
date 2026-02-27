@@ -27,7 +27,7 @@ class TestRoundRobinBalancing:
         for _ in range(10):
             assert (
                 httpx.post(
-                    f"{router_url}/generate",
+                    f"{router_url}/v1/images/generations",
                     json={"prompt": "t", "response_format": "b64_json"},
                     timeout=10.0,
                 ).status_code
@@ -43,7 +43,7 @@ class TestRoundRobinBalancing:
         ids = []
         for _ in range(4):
             r = httpx.post(
-                f"{router_url}/generate",
+                f"{router_url}/v1/images/generations",
                 json={"prompt": "t", "response_format": "b64_json"},
                 timeout=10.0,
             )
@@ -68,7 +68,7 @@ class TestLeastRequestBalancing:
 
             def send_one():
                 return httpx.post(
-                    f"{rurl}/generate",
+                    f"{rurl}/v1/images/generations",
                     json={"prompt": "t", "response_format": "b64_json"},
                     timeout=15.0,
                 ).json()["worker_id"]
@@ -92,7 +92,9 @@ class TestWorkerFailure:
         proc, rurl = _start_router(["http://127.0.0.1:1"])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/generate", json={"prompt": "t"}, timeout=10.0)
+            r = httpx.post(
+                f"{rurl}/v1/images/generations", json={"prompt": "t"}, timeout=10.0
+            )
             assert r.status_code == 502
             assert "error" in r.json()
         finally:
@@ -105,7 +107,7 @@ class TestWorkerFailure:
             _wait_healthy(w_url)
             _wait_healthy(rurl)
             r = httpx.post(
-                f"{rurl}/generate",
+                f"{rurl}/v1/images/generations",
                 json={"prompt": "t", "response_format": "b64_json"},
                 timeout=10.0,
             )
@@ -123,7 +125,7 @@ class TestWorkerFailure:
             _wait_healthy(rurl)
             assert (
                 httpx.post(
-                    f"{rurl}/generate",
+                    f"{rurl}/v1/images/generations",
                     json={"prompt": "t", "response_format": "b64_json"},
                     timeout=10.0,
                 ).status_code
@@ -132,7 +134,7 @@ class TestWorkerFailure:
             _kill_proc(w_proc)
             time.sleep(0.5)
             r = httpx.post(
-                f"{rurl}/generate",
+                f"{rurl}/v1/images/generations",
                 json={"prompt": "t", "response_format": "b64_json"},
                 timeout=10.0,
             )
@@ -146,7 +148,7 @@ class TestConcurrency:
     def test_concurrent_requests_all_succeed(self, router_url):
         def send_one(i):
             return httpx.post(
-                f"{router_url}/generate",
+                f"{router_url}/v1/images/generations",
                 json={"prompt": f"concurrent-{i}", "response_format": "b64_json"},
                 timeout=15.0,
             )
@@ -164,14 +166,14 @@ class TestConcurrency:
     def test_concurrent_mixed_endpoints(self, router_url):
         def gen_image():
             return httpx.post(
-                f"{router_url}/generate",
+                f"{router_url}/v1/images/generations",
                 json={"prompt": "img", "response_format": "b64_json"},
                 timeout=15.0,
             )
 
         def gen_video():
             return httpx.post(
-                f"{router_url}/generate_video", json={"prompt": "vid"}, timeout=15.0
+                f"{router_url}/v1/videos", json={"prompt": "vid"}, timeout=15.0
             )
 
         def check_health():

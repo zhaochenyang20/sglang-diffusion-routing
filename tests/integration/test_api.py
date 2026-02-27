@@ -30,9 +30,7 @@ class TestHealth:
         assert body["total_workers"] == 2
 
     def test_health_workers_detail(self, router_url):
-        workers = httpx.get(f"{router_url}/health_workers", timeout=5.0).json()[
-            "workers"
-        ]
+        workers = httpx.get(f"{router_url}/workers", timeout=5.0).json()["workers"]
         assert len(workers) == 2
         for w in workers:
             assert not w["is_dead"]
@@ -41,7 +39,8 @@ class TestHealth:
             assert w["consecutive_failures"] == 0
 
     def test_list_workers(self, router_url):
-        urls = httpx.get(f"{router_url}/list_workers", timeout=5.0).json()["urls"]
+        workers = httpx.get(f"{router_url}/workers", timeout=5.0).json()["workers"]
+        urls = [worker["url"] for worker in workers]
         assert len(urls) == 2
         assert all(u.startswith("http://") for u in urls)
 
@@ -65,10 +64,10 @@ class TestWorkerRegistration:
         try:
             _wait_responding(rurl)
             r = httpx.post(
-                f"{rurl}/add_worker", params={"url": fake_workers[0].url}, timeout=5.0
+                f"{rurl}/workers", params={"url": fake_workers[0].url}, timeout=5.0
             )
             assert r.status_code == 200
-            assert fake_workers[0].url in r.json()["worker_urls"]
+            assert r.json()["worker"]["url"] == fake_workers[0].url
         finally:
             _kill_proc(proc)
 
@@ -77,7 +76,7 @@ class TestWorkerRegistration:
         try:
             _wait_responding(rurl)
             r = httpx.post(
-                f"{rurl}/add_worker", json={"url": fake_workers[0].url}, timeout=5.0
+                f"{rurl}/workers", json={"url": fake_workers[0].url}, timeout=5.0
             )
             assert r.status_code == 200
             assert r.json()["status"] == "success"
@@ -89,11 +88,10 @@ class TestWorkerRegistration:
         try:
             _wait_responding(rurl)
             url = fake_workers[0].url
-            httpx.post(f"{rurl}/add_worker", params={"url": url + "/"}, timeout=5.0)
-            httpx.post(f"{rurl}/add_worker", params={"url": url}, timeout=5.0)
-            assert (
-                len(httpx.get(f"{rurl}/list_workers", timeout=5.0).json()["urls"]) == 1
-            )
+            httpx.post(f"{rurl}/workers", params={"url": url + "/"}, timeout=5.0)
+            httpx.post(f"{rurl}/workers", params={"url": url}, timeout=5.0)
+            workers = httpx.get(f"{rurl}/workers", timeout=5.0).json()["workers"]
+            assert len(workers) == 1
         finally:
             _kill_proc(proc)
 
@@ -101,7 +99,7 @@ class TestWorkerRegistration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/add_worker", timeout=5.0)
+            r = httpx.post(f"{rurl}/workers", timeout=5.0)
             assert r.status_code == 400
             assert "error" in r.json()
         finally:
@@ -112,7 +110,7 @@ class TestWorkerRegistration:
         try:
             _wait_responding(rurl)
             r = httpx.post(
-                f"{rurl}/add_worker",
+                f"{rurl}/workers",
                 params={"url": "http://169.254.169.254:80"},
                 timeout=5.0,
             )
@@ -126,7 +124,7 @@ class TestWorkerRegistration:
         try:
             _wait_responding(rurl)
             r = httpx.post(
-                f"{rurl}/add_worker",
+                f"{rurl}/workers",
                 content=b"bad json",
                 headers={"content-type": "application/json"},
                 timeout=5.0,
@@ -142,12 +140,11 @@ class TestWorkerRegistration:
         try:
             _wait_healthy(w_url)
             _wait_responding(rurl)
-            httpx.post(f"{rurl}/add_worker", params={"url": w_url}, timeout=5.0)
-            assert (
-                len(httpx.get(f"{rurl}/list_workers", timeout=5.0).json()["urls"]) == 1
-            )
+            httpx.post(f"{rurl}/workers", params={"url": w_url}, timeout=5.0)
+            workers = httpx.get(f"{rurl}/workers", timeout=5.0).json()["workers"]
+            assert len(workers) == 1
             r = httpx.post(
-                f"{rurl}/generate",
+                f"{rurl}/v1/images/generations",
                 json={"prompt": "t", "response_format": "b64_json"},
                 timeout=10.0,
             )
@@ -161,7 +158,7 @@ class TestWorkerRegistration:
 class TestImageGeneration:
     def test_b64_json_returns_valid_png(self, router_url):
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": "test-model",
                 "prompt": "cat",
@@ -179,7 +176,7 @@ class TestImageGeneration:
 
     def test_url_format(self, router_url):
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": "t",
                 "prompt": "dog",
@@ -194,7 +191,7 @@ class TestImageGeneration:
 
     def test_multiple_images(self, router_url):
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": "t",
                 "prompt": "x",
@@ -211,7 +208,7 @@ class TestImageGeneration:
     def test_prompt_preserved_in_response(self, router_url):
         prompt = "a beautiful sunset over the ocean"
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": "t",
                 "prompt": prompt,
@@ -224,7 +221,7 @@ class TestImageGeneration:
 
     def test_model_field_preserved(self, router_url):
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": "my-custom-model",
                 "prompt": "x",
@@ -239,7 +236,9 @@ class TestImageGeneration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/generate", json={"prompt": "t"}, timeout=5.0)
+            r = httpx.post(
+                f"{rurl}/v1/images/generations", json={"prompt": "t"}, timeout=5.0
+            )
             assert r.status_code == 503
             assert "error" in r.json()
         finally:
@@ -249,7 +248,7 @@ class TestImageGeneration:
 class TestVideoGeneration:
     def test_generate_video(self, router_url):
         r = httpx.post(
-            f"{router_url}/generate_video",
+            f"{router_url}/v1/videos",
             json={"model": "vid-model", "prompt": "river"},
             timeout=10.0,
         )
@@ -261,7 +260,7 @@ class TestVideoGeneration:
     def test_video_prompt_preserved(self, router_url):
         prompt = "a flowing river in autumn"
         r = httpx.post(
-            f"{router_url}/generate_video",
+            f"{router_url}/v1/videos",
             json={"model": "vid", "prompt": prompt},
             timeout=10.0,
         )
@@ -271,8 +270,9 @@ class TestVideoGeneration:
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
-            r = httpx.post(f"{rurl}/generate_video", json={"prompt": "t"}, timeout=5.0)
-            assert r.status_code == 503
+            r = httpx.post(f"{rurl}/v1/videos", json={"prompt": "t"}, timeout=5.0)
+            assert r.status_code == 400
+            assert "video-capable" in r.json()["error"]
         finally:
             _kill_proc(proc)
 
@@ -301,7 +301,8 @@ class TestUpdateWeights:
                 json={"model_path": "x"},
                 timeout=5.0,
             )
-            assert r.json()["results"] == []
+            assert r.status_code == 503
+            assert "No healthy workers available" in r.json()["error"]
         finally:
             _kill_proc(proc)
 

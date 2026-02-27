@@ -343,7 +343,8 @@ class TestSglangHealth:
         assert r.json()["status"] == "healthy"
 
     def test_workers_listed(self, router_url, sglang_workers):
-        urls = httpx.get(f"{router_url}/list_workers", timeout=10.0).json()["urls"]
+        workers = httpx.get(f"{router_url}/workers", timeout=10.0).json()["workers"]
+        urls = [w["url"] for w in workers]
         assert len(urls) == len(sglang_workers)
 
 
@@ -351,7 +352,7 @@ class TestSglangImageGeneration:
     def test_b64_json_generates_real_image(self, router_url, sglang_config):
         """Generate a real image and verify payload is a supported image format."""
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": sglang_config["model"],
                 "prompt": "a simple red circle on white background",
@@ -379,7 +380,7 @@ class TestSglangImageGeneration:
             "response_format": "b64_json",
         }
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json=payload,
             timeout=120.0,
         )
@@ -399,7 +400,7 @@ class TestSglangImageGeneration:
         single_image_payload = dict(payload)
         single_image_payload["n"] = 1
         single = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json=single_image_payload,
             timeout=120.0,
         )
@@ -416,7 +417,7 @@ class TestSglangImageGeneration:
     def test_url_format(self, router_url, sglang_config):
         """Generate with response_format=url (requires worker file storage)."""
         r = httpx.post(
-            f"{router_url}/generate",
+            f"{router_url}/v1/images/generations",
             json={
                 "model": sglang_config["model"],
                 "prompt": "a green triangle",
@@ -440,7 +441,7 @@ class TestSglangLoadBalancing:
 
         for _ in range(4):
             r = httpx.post(
-                f"{router_url}/generate",
+                f"{router_url}/v1/images/generations",
                 json={
                     "model": sglang_config["model"],
                     "prompt": "test",
@@ -452,7 +453,7 @@ class TestSglangLoadBalancing:
             assert r.status_code == 200
 
         # Verify health shows all workers still alive
-        health = httpx.get(f"{router_url}/health_workers", timeout=10.0).json()
+        health = httpx.get(f"{router_url}/workers", timeout=10.0).json()
         assert all(not w["is_dead"] for w in health["workers"])
 
 
@@ -466,9 +467,9 @@ class TestSglangProxy:
 
 class TestSglangVideoEndpoint:
     def test_generate_video_rejects_image_only_workers(self, router_url):
-        """Image-only workers (e.g. Qwen/Qwen-Image) should return 400 for /generate_video."""
+        """Image-only workers (e.g. Qwen/Qwen-Image) should return 400 for /v1/videos."""
         r = httpx.post(
-            f"{router_url}/generate_video",
+            f"{router_url}/v1/videos",
             json={"prompt": "a walking cat", "num_frames": 8},
             timeout=10.0,
         )
