@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-import threading
 
 from sglang_diffusion_routing import DiffusionRouter
 from sglang_diffusion_routing.launcher import config as _lcfg
@@ -114,16 +113,19 @@ def _handle_router(args: argparse.Namespace) -> int:
             launcher_cfg = _lcfg.load_launcher_config(args.launcher_config)
             wait_timeout = launcher_cfg.wait_timeout
             backend = _lcfg.create_backend(launcher_cfg)
-            backend.launch()
-            threading.Thread(
-                target=backend.wait_ready_and_register,
-                kwargs=dict(
-                    register_func=router.register_worker,
-                    timeout=wait_timeout,
-                    log_prefix=log_prefix,
-                ),
-                daemon=True,
-            ).start()
+            launched_urls = backend.launch()
+            backend.wait_ready_and_register(
+                register_func=router.register_worker,
+                timeout=wait_timeout,
+                log_prefix=log_prefix,
+            )
+            registered_urls = set(router.worker_request_counts.keys())
+            pending_urls = [u for u in launched_urls if u not in registered_urls]
+            if pending_urls:
+                raise RuntimeError(
+                    "managed workers failed to become healthy before router startup: "
+                    + ", ".join(pending_urls)
+                )
 
         _run_router_server(args, router=router, log_prefix=log_prefix)
         return 0

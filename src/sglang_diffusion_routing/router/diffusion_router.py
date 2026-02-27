@@ -6,6 +6,7 @@ import ipaddress
 import json
 import logging
 import random
+from contextlib import asynccontextmanager
 from urllib.parse import quote, unquote, urlsplit, urlunsplit
 
 import httpx
@@ -26,9 +27,7 @@ class DiffusionRouter:
         self.args = args
         self.verbose = verbose
 
-        self.app = FastAPI()
-        self.app.add_event_handler("startup", self._start_background_health_check)
-        self.app.add_event_handler("shutdown", self._shutdown)
+        self.app = FastAPI(lifespan=self._lifespan)
 
         # URL -> active request count
         self.worker_request_counts: dict[str, int] = {}
@@ -57,6 +56,14 @@ class DiffusionRouter:
         )
 
         self._setup_routes()
+
+    @asynccontextmanager
+    async def _lifespan(self, app: FastAPI):
+        await self._start_background_health_check()
+        try:
+            yield
+        finally:
+            await self._shutdown()
 
     def _setup_routes(self) -> None:
         self.app.post("/workers")(self.create_worker)
