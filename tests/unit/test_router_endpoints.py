@@ -339,6 +339,7 @@ def test_update_weights_from_disk_returns_503_without_healthy_workers():
         assert response.status_code == 503
         assert "No healthy workers available" in response.json()["error"]
 
+
 def test_release_memory_occupation_broadcasts_and_marks_sleeping_on_200_only():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")
@@ -427,6 +428,7 @@ def test_select_worker_excludes_sleeping_workers():
 
     picked = router._select_worker_by_routing()
     assert picked == "http://localhost:10091"
+
 
 def test_select_worker_increments_count_only_for_selected():
     router = DiffusionRouter(make_router_args(routing_algorithm="least-request"))
