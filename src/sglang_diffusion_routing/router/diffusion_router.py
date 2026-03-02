@@ -387,11 +387,13 @@ class DiffusionRouter:
         """
         if path == "resume_memory_occupation":
             # Wake is a recovery point: allow waking workers that were marked dead during sleep.
-            urls = [u for u in self.sleeping_workers if u in self.worker_request_counts]
+            urls = [
+                u for u in self.sleeping_workers
+                if u in self.worker_request_counts
+            ]
         else:
             urls = [
-                u
-                for u in self.worker_request_counts
+                u for u in self.worker_request_counts
                 if u not in self.dead_workers and u not in self.sleeping_workers
             ]
 
@@ -739,48 +741,47 @@ class DiffusionRouter:
         )
         return JSONResponse(content={"results": results})
 
-    async def release_memory_occupation(self, request: Request):
+    async def _broadcast_to_pool(self, request: Request, path: str) -> tuple[int, dict]:
+        if not self.worker_request_counts:
+            return 503, {"error": "No workers registered in the pool"}
+
         body = await request.body()
         headers = dict(request.headers)
 
-        # _broadcast_to_workers exclude dead & sleeping
-        results = await self._broadcast_to_workers(
-            "release_memory_occupation", body, headers
-        )
+        results = await self._broadcast_to_workers(path, body, headers)
         if not results:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "No eligible workers available in the pool"},
-            )
+            return 503, {"error": "No eligible workers available in the pool"}
 
-        # Mark sleeping only on successful sleep responses
-        for item in results:
+        return 200, {"results": results}
+
+    async def release_memory_occupation(self, request: Request):
+        status, payload = await self._broadcast_to_pool(
+            request, "release_memory_occupation"
+        )
+        if status != 200:
+            return JSONResponse(status_code=status, content=payload)
+
+        for item in payload["results"]:
             if item.get("status_code") == 200:
                 self.sleeping_workers.add(item["worker_url"])
 
-        return JSONResponse(content={"results": results})
+        return JSONResponse(content=payload)
 
     async def resume_memory_occupation(self, request: Request):
-        body = await request.body()
-        headers = dict(request.headers)
-
-        results = await self._broadcast_to_workers(
-            "resume_memory_occupation", body, headers
+        status, payload = await self._broadcast_to_pool(
+            request, "resume_memory_occupation"
         )
-        if not results:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "No sleeping workers available in the pool"},
-            )
+        if status != 200:
+            return JSONResponse(status_code=status, content=payload)
 
-        for item in results:
+        for item in payload["results"]:
             if item.get("status_code") == 200:
                 url = item["worker_url"]
                 self.sleeping_workers.discard(url)
                 self.worker_failure_counts[url] = 0
-                self.dead_workers.discard(url)
+                self.dead_workers.discard(url)  # wake success => recover
 
-        return JSONResponse(content={"results": results})
+        return JSONResponse(content=payload)
 
     def register_worker(self, url: str) -> None:
         """Register a worker URL if not already known."""
