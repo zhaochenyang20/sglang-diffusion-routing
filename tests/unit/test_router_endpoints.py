@@ -340,6 +340,18 @@ def test_update_weights_from_disk_returns_503_without_healthy_workers():
         assert "No healthy workers available" in response.json()["error"]
 
 
+def test_get_v1_videos_by_query_video_id_returns_503_if_worker_sleeping():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://localhost:10090")
+    router.video_job_to_worker["video_123"] = "http://localhost:10090"
+    router.sleeping_workers.add("http://localhost:10090")
+
+    with TestClient(router.app) as client:
+        resp = client.get("/v1/videos", params={"video_id": "video_123"})
+        assert resp.status_code == 503
+        assert "sleeping" in resp.json()["error"].lower()
+
+
 def test_release_memory_occupation_broadcasts_and_marks_sleeping_on_200_only():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")
@@ -374,46 +386,38 @@ def test_release_memory_occupation_broadcasts_and_marks_sleeping_on_200_only():
     assert "http://localhost:10091" not in router.sleeping_workers
 
 
-def test_resume_memory_occupation_broadcasts_unmarks_sleeping_and_resets_failure_count_on_200():
+def test_resume_memory_occupation_unmarks_sleeping_resets_failure_and_revives_dead_on_200():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")
     router.register_worker("http://localhost:10091")
 
-    router.sleeping_workers.add("http://localhost:10090")
-    router.sleeping_workers.add("http://localhost:10091")
+    # both sleeping
+    router.sleeping_workers.update(["http://localhost:10090", "http://localhost:10091"])
     router.worker_failure_counts["http://localhost:10090"] = 2
     router.worker_failure_counts["http://localhost:10091"] = 2
 
+    # simulate: worker got marked dead during sleep
+    router.dead_workers.add("http://localhost:10090")
+
     async def fake_broadcast(path: str, body: bytes, headers: dict):
         assert path == "resume_memory_occupation"
-        assert body in (b"{}", b"")
-        assert headers.get("content-type", "").startswith("application/json")
         return [
-            {
-                "worker_url": "http://localhost:10090",
-                "status_code": 200,
-                "body": {"success": True},
-            },
-            {
-                "worker_url": "http://localhost:10091",
-                "status_code": 500,
-                "body": {"success": False, "message": "internal"},
-            },
+            {"worker_url": "http://localhost:10090", "status_code": 200, "body": {}},
+            {"worker_url": "http://localhost:10091", "status_code": 500, "body": {}},
         ]
 
-    router._broadcast_to_workers = fake_broadcast
+    router._broadcast_to_workers = fake_broadcast  # type: ignore[assignment]
 
     with TestClient(router.app) as client:
         resp = client.post("/resume_memory_occupation", json={})
         assert resp.status_code == 200
-        results = resp.json()["results"]
-        assert len(results) == 2
 
-    # Only the HTTP 200 worker should be unmarked + failure reset
+    # 200 worker: woken => not sleeping, failure reset, dead cleared
     assert "http://localhost:10090" not in router.sleeping_workers
     assert router.worker_failure_counts["http://localhost:10090"] == 0
+    assert "http://localhost:10090" not in router.dead_workers
 
-    # Non-200 worker remains sleeping + failure unchanged
+    # non-200 worker: still sleeping, failure unchanged
     assert "http://localhost:10091" in router.sleeping_workers
     assert router.worker_failure_counts["http://localhost:10091"] == 2
 

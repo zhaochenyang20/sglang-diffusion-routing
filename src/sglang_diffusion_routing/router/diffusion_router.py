@@ -302,6 +302,10 @@ class DiffusionRouter:
             return JSONResponse(
                 status_code=503, content={"error": "Mapped worker is unavailable"}
             )
+        if worker_url in self.sleeping_workers:
+            return JSONResponse(
+                status_code=503, content={"error": "Mapped worker is sleeping"}
+            )
         self.worker_request_counts[worker_url] += 1
         return await self._forward_to_selected_worker(request, path, worker_url)
 
@@ -357,7 +361,12 @@ class DiffusionRouter:
                 )
                 if isinstance(task_type, str):
                     return task_type.upper() not in _IMAGE_TASK_TYPES
-        except (httpx.RequestError, json.JSONDecodeError):
+        except (httpx.RequestError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "[diffusion-router] video support probe failed: worker=%s error=%s",
+                worker_url,
+                exc,
+            )
             return None
 
     async def refresh_worker_video_support(self, worker_url: str) -> None:
@@ -369,8 +378,23 @@ class DiffusionRouter:
     async def _broadcast_to_workers(
         self, path: str, body: bytes, headers: dict
     ) -> list[dict]:
-        """Send a request to all healthy workers and collect results."""
-        urls = [u for u in self.worker_request_counts if u not in self.dead_workers]
+        """
+        Broadcast request to eligible workers.
+
+        Rules:
+        - For resume_memory_occupation (wake): target sleeping workers (even if currently marked dead).
+        - For all other requests: target only active workers (exclude dead AND sleeping).
+        """
+        if path == "resume_memory_occupation":
+            # Wake is a recovery point: allow waking workers that were marked dead during sleep.
+            urls = [u for u in self.sleeping_workers if u in self.worker_request_counts]
+        else:
+            urls = [
+                u
+                for u in self.worker_request_counts
+                if u not in self.dead_workers and u not in self.sleeping_workers
+            ]
+
         if not urls:
             return []
 
@@ -490,6 +514,7 @@ class DiffusionRouter:
             "url": worker_url,
             "active_requests": self.worker_request_counts.get(worker_url, 0),
             "is_dead": worker_url in self.dead_workers,
+            "is_sleeping": worker_url in self.sleeping_workers,
             "consecutive_failures": self.worker_failure_counts.get(worker_url, 0),
             "video_support": self.worker_video_support.get(worker_url),
         }
@@ -550,6 +575,7 @@ class DiffusionRouter:
             if support
             and worker_url in self.worker_request_counts
             and worker_url not in self.dead_workers
+            and worker_url not in self.sleeping_workers
         ]
 
     @staticmethod
@@ -603,7 +629,7 @@ class DiffusionRouter:
         worker_urls = [
             url
             for url in self.worker_request_counts.keys()
-            if url not in self.dead_workers
+            if url not in self.dead_workers and url not in self.sleeping_workers
         ]
         if not worker_urls:
             return JSONResponse(
@@ -680,7 +706,8 @@ class DiffusionRouter:
         """Aggregated health status: healthy if at least one worker is alive."""
         total = len(self.worker_request_counts)
         dead = len(self.dead_workers)
-        healthy = total - dead
+        sleeping = len(self.sleeping_workers)
+        healthy = total - dead - sleeping
         status = "healthy" if healthy > 0 else "unhealthy"
         code = 200 if healthy > 0 else 503
         return JSONResponse(
@@ -689,6 +716,8 @@ class DiffusionRouter:
                 "status": status,
                 "healthy_workers": healthy,
                 "total_workers": total,
+                "dead_workers": dead,
+                "sleeping_workers": sleeping,
             },
         )
 
@@ -711,25 +740,20 @@ class DiffusionRouter:
         return JSONResponse(content={"results": results})
 
     async def release_memory_occupation(self, request: Request):
-        """Broadcast sleep to all healthy workers and mark them as sleeping on success."""
-        healthy_workers = [
-            url for url in self.worker_request_counts if url not in self.dead_workers
-        ]
-        if not healthy_workers:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "No healthy workers available in the pool"},
-            )
-
         body = await request.body()
         headers = dict(request.headers)
-        headers.pop("content-length", None)
-        headers.setdefault("content-type", "application/json")
 
+        # _broadcast_to_workers exclude dead & sleeping
         results = await self._broadcast_to_workers(
             "release_memory_occupation", body, headers
         )
+        if not results:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "No eligible workers available in the pool"},
+            )
 
+        # Mark sleeping only on successful sleep responses
         for item in results:
             if item.get("status_code") == 200:
                 self.sleeping_workers.add(item["worker_url"])
@@ -737,31 +761,24 @@ class DiffusionRouter:
         return JSONResponse(content={"results": results})
 
     async def resume_memory_occupation(self, request: Request):
-        """Broadcast wake to all healthy workers and unmark sleeping on success."""
-        healthy_workers = [
-            url for url in self.worker_request_counts if url not in self.dead_workers
-        ]
-        if not healthy_workers:
-            return JSONResponse(
-                status_code=503,
-                content={"error": "No healthy workers available in the pool"},
-            )
         body = await request.body()
         headers = dict(request.headers)
-        headers.pop("content-length", None)
-        headers.setdefault("content-type", "application/json")
 
         results = await self._broadcast_to_workers(
             "resume_memory_occupation", body, headers
         )
+        if not results:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "No sleeping workers available in the pool"},
+            )
 
         for item in results:
             if item.get("status_code") == 200:
-                self.sleeping_workers.discard(item["worker_url"])
-                # Reset health failure counter on successful wake:
-                # waking is an explicit recovery point and should not inherit failures
-                # accumulated during intentional sleep.
-                self.worker_failure_counts[item["worker_url"]] = 0
+                url = item["worker_url"]
+                self.sleeping_workers.discard(url)
+                self.worker_failure_counts[url] = 0
+                self.dead_workers.discard(url)
 
         return JSONResponse(content={"results": results})
 
@@ -781,6 +798,7 @@ class DiffusionRouter:
         self.worker_failure_counts.pop(normalized_url, None)
         self.worker_video_support.pop(normalized_url, None)
         self.dead_workers.discard(normalized_url)
+        self.sleeping_workers.discard(normalized_url)
         stale_video_ids = [
             video_id
             for video_id, mapped_worker in self.video_job_to_worker.items()
