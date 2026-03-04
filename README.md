@@ -20,25 +20,21 @@ A lightweight router for SGLang diffusion workers used in RL systems. It provide
 
 ## Installation
 
-From repository root:
-
 ```bash
-# Create a virtual environment
-# python3 -m venv .venv
-# source .venv/bin/activate
-# pip install uv
 git clone --recursive https://github.com/zhaochenyang20/sglang-diffusion-routing.git
 cd sglang-diffusion-routing
-uv pip install .
-```
 
-Workers require SGLang diffusion support:
-
-```bash
-# If cloned sglang-diffusion-routing without --recursive, run:
+# If cloned without --recursive, initialize the sglang submodule:
 # git submodule update --init --recursive
+
+# Install the router package
+uv pip install .
+
+# Install SGLang diffusion from the pinned submodule (includes RL patches).
+# Do NOT install sglang from PyPI — the submodule tracks a fork with
+# /v1/diffusion/generate, flow-matching log-prob, and other RL features.
 cd sglang
-uv pip install "sglang[diffusion]" --prerelease=allow
+uv pip install ".[diffusion]" --prerelease=allow
 cd ..
 ```
 
@@ -188,7 +184,6 @@ resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
     "get_log_probs": True,
 })
 data = resp.json()
-print(f"Request ID: {data['id']}")
 print(f"Inference time: {data.get('inference_time_s')}s")
 
 # Decode the output image
