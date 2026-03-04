@@ -1,3 +1,4 @@
 [submodule "sglang"]
 	path = sglang
 	url = https://github.com/sgl-project/sglang.git
+	branch = diffusion-rl-base

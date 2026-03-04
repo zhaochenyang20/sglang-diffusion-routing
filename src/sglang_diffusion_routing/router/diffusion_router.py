@@ -76,6 +76,7 @@ class DiffusionRouter:
         self.app.put("/workers/{worker_id:path}")(self.update_worker)
         self.app.delete("/workers/{worker_id:path}")(self.delete_worker)
         self.app.post("/v1/images/generations")(self.generate)
+        self.app.post("/v1/diffusion/generate")(self.diffusion_generate)
         self.app.post("/v1/videos")(self.generate_video)
         self.app.get("/v1/videos")(self.list_or_poll_videos)
         self.app.get("/v1/videos/{video_id}")(self.get_video_job)
@@ -556,6 +557,10 @@ class DiffusionRouter:
     async def generate(self, request: Request):
         """Route image generation requests to worker /v1/images/generations."""
         return await self._forward_to_worker(request, "v1/images/generations")
+
+    async def diffusion_generate(self, request: Request):
+        """Route native diffusion generation requests to worker /v1/diffusion/generate."""
+        return await self._forward_to_worker(request, "v1/diffusion/generate")
 
     async def generate_video(self, request: Request):
         """Route video generation requests to worker /v1/videos."""

@@ -131,6 +131,27 @@ def test_v1_images_generations_routes_to_image_path():
         assert call_args["worker_urls"] is None
 
 
+def test_v1_diffusion_generate_routes_to_diffusion_path():
+    router = DiffusionRouter(make_router_args())
+    call_args: dict = {}
+
+    async def fake_forward(request, path: str, worker_urls=None):
+        del request
+        call_args["path"] = path
+        call_args["worker_urls"] = worker_urls
+        return JSONResponse(status_code=200, content={"ok": True})
+
+    router._forward_to_worker = fake_forward  # type: ignore[assignment]
+    with TestClient(router.app) as client:
+        response = client.post(
+            "/v1/diffusion/generate",
+            json={"prompt": "cat", "get_latents": True, "get_log_probs": False},
+        )
+        assert response.status_code == 200
+        assert call_args["path"] == "v1/diffusion/generate"
+        assert call_args["worker_urls"] is None
+
+
 def test_v1_videos_requires_video_capable_workers():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")
