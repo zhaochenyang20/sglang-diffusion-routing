@@ -10,9 +10,18 @@ import time
 from collections.abc import Iterable
 
 import httpx
-import torch
 
 # TODO (mengyang, shuwen, chenyang): these utils should be clean up.
+
+
+def _cuda_device_count() -> int:
+    """Best-effort CUDA device count without hard torch import at module import."""
+    try:
+        import torch
+
+        return int(torch.cuda.device_count())
+    except Exception:
+        return 0
 
 
 def infer_connect_host(host: str) -> str:
@@ -72,7 +81,7 @@ def resolve_gpu_pool(
         if parsed:
             return parsed
 
-    gpu_count = int(torch.cuda.device_count())
+    gpu_count = _cuda_device_count()
     if gpu_count > 0:
         return [str(i) for i in range(gpu_count)]
     return None
@@ -116,7 +125,7 @@ def build_gpu_assignments(
             gpu_pool = parsed
 
     if gpu_pool is None:
-        gpu_count = int(torch.cuda.device_count())
+        gpu_count = _cuda_device_count()
         if gpu_count > 0:
             gpu_pool = [str(i) for i in range(gpu_count)]
 

@@ -38,6 +38,8 @@ class DiffusionRouter:
         self.worker_task_type: dict[str, str | None] = {}
         # quarantined workers excluded from routing
         self.dead_workers: set[str] = set()
+        # record workers in sleeping status
+        self.sleeping_workers: set[str] = set()
         # video_id -> worker URL mapping for stable query routing
         self.video_job_to_worker: dict[str, str] = {}
         self._health_task: asyncio.Task | None = None
@@ -74,6 +76,7 @@ class DiffusionRouter:
         self.app.put("/workers/{worker_id:path}")(self.update_worker)
         self.app.delete("/workers/{worker_id:path}")(self.delete_worker)
         self.app.post("/v1/images/generations")(self.generate)
+        self.app.post("/v1/diffusion/generate")(self.diffusion_generate)
         self.app.post("/v1/videos")(self.generate_video)
         self.app.get("/v1/videos")(self.list_or_poll_videos)
         self.app.get("/v1/videos/{video_id}")(self.get_video_job)
@@ -81,11 +84,23 @@ class DiffusionRouter:
         self.app.get("/v1/models")(self.get_models)
         self.app.get("/health")(self.health)
         self.app.post("/update_weights_from_disk")(self.update_weights_from_disk)
+        self.app.post("/release_memory_occupation")(self.release_memory_occupation)
+        self.app.post("/resume_memory_occupation")(self.resume_memory_occupation)
         self.app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])(
             self.proxy
         )
 
     async def _start_background_health_check(self) -> None:
+        # Probe capability for pre-registered workers in the active server loop.
+        unknown_workers = [
+            url for url, support in self.worker_video_support.items() if support is None
+        ]
+        if unknown_workers:
+            await asyncio.gather(
+                *(self.refresh_worker_video_support(url) for url in unknown_workers),
+                return_exceptions=True,
+            )
+
         if self._health_task is None or self._health_task.done():
             self._health_task = asyncio.create_task(self._health_check_loop())
 
@@ -173,7 +188,9 @@ class DiffusionRouter:
             raise RuntimeError("No workers registered in the pool")
 
         valid_workers = [
-            w for w in self.worker_request_counts if w not in self.dead_workers
+            w
+            for w in self.worker_request_counts
+            if w not in self.dead_workers and w not in self.sleeping_workers
         ]
         if worker_urls is not None:
             allowed = {w for w in worker_urls if w in self.worker_request_counts}
@@ -296,6 +313,10 @@ class DiffusionRouter:
             return JSONResponse(
                 status_code=503, content={"error": "Mapped worker is unavailable"}
             )
+        if worker_url in self.sleeping_workers:
+            return JSONResponse(
+                status_code=503, content={"error": "Mapped worker is sleeping"}
+            )
         self.worker_request_counts[worker_url] += 1
         return await self._forward_to_selected_worker(request, path, worker_url)
 
@@ -350,10 +371,14 @@ class DiffusionRouter:
                     else None
                 )
                 if isinstance(task_type, str):
-                    return task_type
-        except (httpx.RequestError, json.JSONDecodeError):
+                    return task_type.upper() not in _IMAGE_TASK_TYPES
+        except (httpx.RequestError, json.JSONDecodeError) as exc:
+            logger.debug(
+                "[diffusion-router] video support probe failed: worker=%s error=%s",
+                worker_url,
+                exc,
+            )
             return None
-        return None
 
     async def refresh_worker_task_type(self, worker_url: str) -> None:
         """Refresh cached task_type for a single worker."""
@@ -364,8 +389,23 @@ class DiffusionRouter:
     async def _broadcast_to_workers(
         self, path: str, body: bytes, headers: dict
     ) -> list[dict]:
-        """Send a request to all healthy workers and collect results."""
-        urls = [u for u in self.worker_request_counts if u not in self.dead_workers]
+        """
+        Broadcast request to eligible workers.
+
+        Rules:
+        - For resume_memory_occupation (wake): target sleeping workers (even if currently marked dead).
+        - For all other requests: target only active workers (exclude dead AND sleeping).
+        """
+        if path == "resume_memory_occupation":
+            # Wake is a recovery point: allow waking workers that were marked dead during sleep.
+            urls = [u for u in self.sleeping_workers if u in self.worker_request_counts]
+        else:
+            urls = [
+                u
+                for u in self.worker_request_counts
+                if u not in self.dead_workers and u not in self.sleeping_workers
+            ]
+
         if not urls:
             return []
 
@@ -485,6 +525,7 @@ class DiffusionRouter:
             "url": worker_url,
             "active_requests": self.worker_request_counts.get(worker_url, 0),
             "is_dead": worker_url in self.dead_workers,
+            "is_sleeping": worker_url in self.sleeping_workers,
             "consecutive_failures": self.worker_failure_counts.get(worker_url, 0),
             "task_type": self.worker_task_type.get(worker_url),
         }
@@ -535,6 +576,10 @@ class DiffusionRouter:
             request, "v1/images/generations", worker_urls=candidate_workers or None
         )
 
+    async def diffusion_generate(self, request: Request):
+        """Route native diffusion generation requests to worker /v1/diffusion/generate."""
+        return await self._forward_to_worker(request, "v1/diffusion/generate")
+
     async def generate_video(self, request: Request):
         """Route video generation to /v1/videos."""
         candidate_workers = [
@@ -572,6 +617,7 @@ class DiffusionRouter:
             and task_type.upper() in _VIDEO_TASK_TYPES
             and worker_url in self.worker_request_counts
             and worker_url not in self.dead_workers
+            and worker_url not in self.sleeping_workers
         ]
 
     @staticmethod
@@ -625,7 +671,7 @@ class DiffusionRouter:
         worker_urls = [
             url
             for url in self.worker_request_counts.keys()
-            if url not in self.dead_workers
+            if url not in self.dead_workers and url not in self.sleeping_workers
         ]
         if not worker_urls:
             return JSONResponse(
@@ -702,7 +748,8 @@ class DiffusionRouter:
         """Aggregated health status: healthy if at least one worker is alive."""
         total = len(self.worker_request_counts)
         dead = len(self.dead_workers)
-        healthy = total - dead
+        sleeping = len(self.sleeping_workers)
+        healthy = total - dead - sleeping
         status = "healthy" if healthy > 0 else "unhealthy"
         code = 200 if healthy > 0 else 503
         return JSONResponse(
@@ -711,6 +758,8 @@ class DiffusionRouter:
                 "status": status,
                 "healthy_workers": healthy,
                 "total_workers": total,
+                "dead_workers": dead,
+                "sleeping_workers": sleeping,
             },
         )
 
@@ -748,6 +797,71 @@ class DiffusionRouter:
         )
         return JSONResponse(content={"results": results})
 
+    async def _broadcast_to_pool(self, request: Request, path: str) -> tuple[int, dict]:
+        if not self.worker_request_counts:
+            return 503, {"error": "No workers registered in the pool"}
+
+        body = await request.body()
+        headers = dict(request.headers)
+
+        results = await self._broadcast_to_workers(path, body, headers)
+        if not results:
+            return 503, {"error": "No eligible workers available in the pool"}
+
+        return 200, {"results": results}
+
+    async def release_memory_occupation(self, request: Request):
+        status, payload = await self._broadcast_to_pool(
+            request, "release_memory_occupation"
+        )
+        if status == 200:
+            for item in payload["results"]:
+                if item.get("status_code") == 200:
+                    self.sleeping_workers.add(item["worker_url"])
+            return JSONResponse(content=payload)
+
+        all_already_sleeping = bool(self.worker_request_counts) and all(
+            url in self.sleeping_workers
+            for url in self.worker_request_counts
+            if url not in self.dead_workers
+        )
+        if all_already_sleeping:
+            return JSONResponse(
+                content={
+                    "message": "All workers are already sleeping",
+                    "sleeping_workers": len(self.sleeping_workers),
+                }
+            )
+
+        return JSONResponse(status_code=status, content=payload)
+
+    async def resume_memory_occupation(self, request: Request):
+        status, payload = await self._broadcast_to_pool(
+            request, "resume_memory_occupation"
+        )
+        if status == 200:
+            for item in payload["results"]:
+                if item.get("status_code") == 200:
+                    url = item["worker_url"]
+                    self.sleeping_workers.discard(url)
+                    self.worker_failure_counts[url] = 0
+                    self.dead_workers.discard(url)
+            return JSONResponse(content=payload)
+
+        has_no_sleeping_workers = not self.sleeping_workers and bool(
+            self.worker_request_counts
+        )
+        if has_no_sleeping_workers:
+            return JSONResponse(
+                content={
+                    "message": "All workers are already active",
+                    "active_workers": len(self.worker_request_counts)
+                    - len(self.dead_workers),
+                }
+            )
+
+        return JSONResponse(status_code=status, content=payload)
+
     def register_worker(self, url: str) -> None:
         """Register a worker URL if not already known."""
         normalized_url = self.normalize_worker_url(url)
@@ -764,6 +878,7 @@ class DiffusionRouter:
         self.worker_failure_counts.pop(normalized_url, None)
         self.worker_task_type.pop(normalized_url, None)
         self.dead_workers.discard(normalized_url)
+        self.sleeping_workers.discard(normalized_url)
         stale_video_ids = [
             video_id
             for video_id, mapped_worker in self.video_job_to_worker.items()

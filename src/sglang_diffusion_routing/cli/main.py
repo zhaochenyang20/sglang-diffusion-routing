@@ -67,18 +67,9 @@ def _run_router_server(
         ) from exc
 
     worker_urls = list(args.worker_urls or [])
-    refresh_tasks = []
     for url in worker_urls:
         normalized_url = router.normalize_worker_url(url)
         router.register_worker(normalized_url)
-        refresh_tasks.append(router.refresh_worker_video_support(normalized_url))
-
-    if refresh_tasks:
-
-        async def _refresh_all_worker_video_support() -> None:
-            await asyncio.gather(*refresh_tasks)
-
-        asyncio.run(_refresh_all_worker_video_support())
 
     print(f"{log_prefix} starting router on {args.host}:{args.port}", flush=True)
     print(

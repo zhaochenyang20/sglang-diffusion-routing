@@ -20,26 +20,22 @@ A lightweight router for SGLang diffusion workers used in RL systems. It provide
 
 ## Installation
 
-From repository root:
-
 ```bash
-# Create a virtual environment
-# python3 -m venv .venv
-# source .venv/bin/activate
-# pip install uv
-git clone --recursive https://github.com/sglang/sglang-diffusion-routing.git
+git clone --recursive https://github.com/zhaochenyang20/sglang-diffusion-routing.git
 cd sglang-diffusion-routing
-uv pip install .
-```
 
-Workers require SGLang diffusion support:
-
-```bash
-# If cloned sglang-diffusion-routing without --recursive, run:
+# If cloned without --recursive, initialize the sglang submodule:
 # git submodule update --init --recursive
-cd sglang
-uv pip install "sglang[diffusion]" --prerelease=allow
-cd ..
+
+# Install the router package
+uv pip install .
+
+# Install SGLang diffusion from the pinned submodule (includes RL patches).
+# Do NOT install sglang from PyPI — the submodule tracks a fork with
+# /v1/diffusion/generate, flow-matching log-prob, and other RL features.
+cd sglang/python
+uv pip install ".[diffusion]" --prerelease=allow
+cd ../..
 ```
 
 ## Quick Start
@@ -64,6 +60,9 @@ launcher:
 
 ### Manual Launch Workers
 
+<details>
+<summary>Manual Launch Workers</summary>
+
 ```bash
 # If connect to HuggingFace is not allowed
 # You can set the environment variable SGLANG_USE_MODELSCOPE=TRUE
@@ -86,7 +85,25 @@ sglang-d-router --port 30081 \
     --worker-urls http://localhost:30000 http://localhost:30002
 ```
 
+</details>
+
+
+
 ## Demonstrative Examples
+
+A typical RL loop looks like:
+
+```
+1. Start workers   → sglang-d-router --port 30081 --launcher-config examples/local_launcher.yaml
+2. Rollout         → POST /v1/images/generations or /v1/diffusion/generate
+3. Sleep workers   → POST /release_memory_occupation
+4. Train on rollout data (GPU memory now free for training)
+5. Wake workers    → POST /resume_memory_occupation
+6. Refit weights   → POST /update_weights_from_disk
+7. Repeat from step 2
+```
+
+We provide all the steps in the code examples below.
 
 ### With Python Requests
 
@@ -119,7 +136,7 @@ resp = requests.put(
 )
 print(resp.json())
 
-# Image generation request (returns base64-encoded image)
+# Image generation request (OpenAI-compatible, returns base64-encoded image)
 resp = requests.post(f"{ROUTER}/v1/images/generations", json={
     "model": "Qwen/Qwen-Image",
     "prompt": "a cute cat",
@@ -144,8 +161,8 @@ resp = requests.get(f"{ROUTER}/health_workers")
 print(resp.json())
 
 # Video generation request
-# Note that Qwen-Image does not support video generation,
-# so this request will fail.
+# Note that Stable-Diffusion-3 does not support video generation,
+# so this request will fail. Use a video-capable model instead.
 
 resp = requests.post(f"{ROUTER}/v1/videos", json={
     "model": "Qwen/Qwen-Image",
@@ -162,62 +179,118 @@ resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
 })
 # {'results': [{'worker_url': 'http://localhost:30000', 'status_code': 200, 'body': {'success': True, 'message': 'Updated 3 modules (text_encoder, vae, transformer).'}}, {'worker_url': 'http://localhost:30002', 'status_code': 502, 'body': {'error': ''}}]}
 print(resp.json())
+
+# sleep and wake up
+resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
+print(resp.json())
+
+
+resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
+print(resp.json())
 ```
 
-### With Curl
+### Native Diffusion Generate Endpoint (with Trajectory & Log-Prob)
 
-```bash
-# Check router health
-curl http://localhost:30081/health
+The `/v1/diffusion/generate` endpoint exposes trajectory data (latents, timesteps)
+and log-probabilities that the OpenAI-compatible endpoints intentionally omit.
+This is intended for RL training pipelines that need intermediate diffusion outputs.
 
-# Register a worker
-curl -X POST http://localhost:30081/workers \
-    -H "Content-Type: application/json" \
-    -d '{"url": "http://localhost:30000"}'
+```python
+import requests
+import base64
+import io
+import numpy as np
 
-# List registered workers (with health/load)
-curl http://localhost:30081/workers
+ROUTER = "http://localhost:30081"
 
-# Image generation request (returns base64-encoded image)
-curl -X POST http://localhost:30081/v1/images/generations \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model": "Qwen/Qwen-Image",
-        "prompt": "a cute cat",
-        "num_images": 1,
-        "response_format": "b64_json"
-    }'
+# Generate with trajectory latents and log-probs
+resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
+    "prompt": "a cute cat",
+    "width": 512,
+    "height": 512,
+    "num_inference_steps": 28,
+    "guidance_scale": 7.0,
+    "seed": 42,
+    "get_latents": True,
+    "get_log_probs": True,
+})
+data = resp.json()
+print(f"Inference time: {data.get('inference_time_s')}s")
 
-# Decode and save the image locally
-curl -s -X POST http://localhost:30081/v1/images/generations \
-    -H "Content-Type: application/json" \
-    -d '{
-        "model": "Qwen/Qwen-Image",
-        "prompt": "a cute cat",
-        "num_images": 1,
-        "response_format": "b64_json"
-    }' | python3 -c "
-import sys, json, base64
-resp = json.load(sys.stdin)
-img = base64.b64decode(resp['data'][0]['b64_json'])
-with open('output.png', 'wb') as f:
-    f.write(img)
-print('Saved to output.png')
-"
+# Decode the output image
+img_bytes = base64.b64decode(data["output_b64"])
+with open("output.png", "wb") as f:
+    f.write(img_bytes)
+print(f"Saved image ({data.get('output_format', 'unknown')} format)")
 
-# Video generation request
-curl -X POST http://localhost:30081/v1/videos \
-    -H "Content-Type: application/json" \
-    -d '{"model": "Qwen/Qwen-Image", "prompt": "a flowing river"}'
+# Decode trajectory data
+trajectory = data.get("trajectory")
+latents = np.load(io.BytesIO(base64.b64decode(trajectory["latents"])))
+print(f"Latents shape: {trajectory['latents_shape']}, dtype: {trajectory['latents_dtype']}")
+print(f"Decoded latents array shape: {latents.shape}")
 
-# Poll a specific video job by video_id
-curl http://localhost:30081/v1/videos/{video_id}
+timesteps = [np.load(io.BytesIO(base64.b64decode(t))) for t in trajectory["timesteps"]]
+print(f"Timesteps count: {len(timesteps)}")
 
-
-curl -X POST http://localhost:30081/update_weights_from_disk \
-    -H "Content-Type: application/json" \
-    -d '{"model_path": "Qwen/Qwen-Image-2512"}'
+log_probs = np.load(io.BytesIO(base64.b64decode(trajectory["log_probs"])))
+print(f"Log-probs shape: {trajectory['log_probs_shape']}")
+print(f"Decoded log-probs array shape: {log_probs.shape}")
 ```
+
+### Rollout with SDE/CPS Log-Prob Computation
+
+For RL training, you can enable rollout mode with flow-matching SDE or CPS
+(Conditional Probability Score) log-probability computation. This is supported
+on both the OpenAI-compatible endpoints and the native diffusion endpoint.
+
+```python
+import requests
+
+ROUTER = "http://localhost:30081"
+
+# Rollout with SDE log-prob (default)
+resp = requests.post(f"{ROUTER}/v1/images/generations", json={
+    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
+    "prompt": "a cute cat",
+    "width": 512,
+    "height": 512,
+    "num_inference_steps": 28,
+    "rollout": True,
+    "rollout_sde_type": "sde",       # "sde" or "cps"
+    "rollout_noise_level": 0.7,
+    "response_format": "b64_json",
+})
+print(resp.json())
+
+# Rollout with CPS log-prob
+resp = requests.post(f"{ROUTER}/v1/images/generations", json={
+    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
+    "prompt": "a cute cat",
+    "width": 512,
+    "height": 512,
+    "num_inference_steps": 28,
+    "rollout": True,
+    "rollout_sde_type": "cps",
+    "rollout_noise_level": 0.5,
+    "response_format": "b64_json",
+})
+print(resp.json())
+
+# Rollout via native diffusion endpoint (with trajectory + log-probs)
+resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
+    "prompt": "a cute cat",
+    "width": 512,
+    "height": 512,
+    "num_inference_steps": 28,
+    "guidance_scale": 7.0,
+    "seed": 42,
+    "get_latents": True,
+    "get_log_probs": True,
+})
+data = resp.json()
+print(f"Trajectory available: {data.get('trajectory') is not None}")
+```
+
 
 ## Router API
 
@@ -225,7 +298,8 @@ curl -X POST http://localhost:30081/update_weights_from_disk \
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/v1/images/generations` | Entrypoint for text-to-image generation |
+| `POST` | `/v1/images/generations` | OpenAI-compatible text-to-image generation |
+| `POST` | `/v1/diffusion/generate` | Native SGLang-D generation with trajectory & log-prob support |
 | `POST` | `/v1/videos` | Entrypoint for text-to-video generation |
 
 ### Videos Result Query
@@ -268,11 +342,14 @@ Video query routing is stable by `video_id`: router caches `video_id -> worker` 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/update_weights_from_disk` | Reload weights from disk on all healthy workers |
+| `POST` | `/release_memory_occupation` | Sleep all healthy workers (release GPU memory) |
+| `POST` | `/resume_memory_occupation` | Wake all sleeping workers (resume GPU memory) |
 
+Both sleep and wake are idempotent. While sleeping, generation requests are rejected (503 from router). A typical RL loop: wake → refit weights → rollout → sleep → train → repeat.
 
 ## Acknowledgment
 
-This project is derived from [radixark/miles#544](https://github.com/radixark/miles/pull/544). Thanks to the original authors.
+This project is derived from [radixark/miles#544](https://github.com/radixark/miles/pull/544) and [alphabetc1/sglang](https://github.com/alphabetc1/sglang/tree/sglang/diffusion-rl-base). Thanks to the original authors.
 
 SGLang Diffusion RL team is responsible for the development and maintenance of this project. Our team mates in alphabetical order:
 

@@ -10,13 +10,17 @@ Run CPU only tests:
 
 ```bash
 pip install pytest
-pytest tests/unit -v
+# CPU-only tests (unit + integration)
+pytest tests/unit tests/integration -v
+
+# Real E2E tests (GPU required, longer runtime)
+pytest tests/e2e/test_e2e_sglang.py -v -s
 ```
 
 ## Benchmark Scripts
 
 Benchmark scripts are available under `tests/benchmarks/diffusion_router/` and are intended for manual runs.
-They are not part of default unit test collection (`pytest tests/unit -v`).
+They are not part of default unit test collection (`pytest tests/unit tests/integration -v`).
 
 Single benchmark:
 
