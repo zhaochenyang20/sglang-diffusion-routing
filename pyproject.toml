@@ -31,8 +31,6 @@ sglang-d-router = "sglang_diffusion_routing.cli.main:main"
 test = [
     "pytest",
     "PyYAML",
-]
-dev = [
     "pre-commit>=4.5.1",
 ]
 

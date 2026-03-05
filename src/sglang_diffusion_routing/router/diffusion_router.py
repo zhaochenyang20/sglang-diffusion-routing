@@ -93,11 +93,11 @@ class DiffusionRouter:
     async def _start_background_health_check(self) -> None:
         # Probe capability for pre-registered workers in the active server loop.
         unknown_workers = [
-            url for url, support in self.worker_video_support.items() if support is None
+            url for url, task_type in self.worker_task_type.items() if task_type is None
         ]
         if unknown_workers:
             await asyncio.gather(
-                *(self.refresh_worker_video_support(url) for url in unknown_workers),
+                *(self.refresh_worker_task_type(url) for url in unknown_workers),
                 return_exceptions=True,
             )
 
@@ -371,7 +371,7 @@ class DiffusionRouter:
                     else None
                 )
                 if isinstance(task_type, str):
-                    return task_type.upper() not in _IMAGE_TASK_TYPES
+                    return task_type.upper()
         except (httpx.RequestError, json.JSONDecodeError) as exc:
             logger.debug(
                 "[diffusion-router] video support probe failed: worker=%s error=%s",
@@ -379,6 +379,7 @@ class DiffusionRouter:
                 exc,
             )
             return None
+        return None
 
     async def refresh_worker_task_type(self, worker_url: str) -> None:
         """Refresh cached task_type for a single worker."""
@@ -589,6 +590,7 @@ class DiffusionRouter:
             and task_type.upper() in _VIDEO_TASK_TYPES
             and worker_url in self.worker_request_counts
             and worker_url not in self.dead_workers
+            and worker_url not in self.sleeping_workers
         ]
 
         if not candidate_workers:
@@ -763,22 +765,6 @@ class DiffusionRouter:
             },
         )
 
-    async def health_workers(self, request: Request):
-        """Per-worker health and load information."""
-        workers = []
-        for url, count in self.worker_request_counts.items():
-            task_type = self.worker_task_type.get(url)
-            workers.append(
-                {
-                    "url": url,
-                    "active_requests": count,
-                    "is_dead": url in self.dead_workers,
-                    "consecutive_failures": self.worker_failure_counts.get(url, 0),
-                    "task_type": task_type,
-                }
-            )
-        return JSONResponse(content={"workers": workers})
-
     async def update_weights_from_disk(self, request: Request):
         """Broadcast weight reload to all healthy workers."""
         healthy_workers = [
@@ -951,7 +937,7 @@ class DiffusionRouter:
                 content={"error": "Request body must be a JSON object"},
             )
 
-        allowed_fields = {"is_dead", "refresh_video_support"}
+        allowed_fields = {"is_dead", "refresh_task_type"}
         unknown_fields = sorted(set(payload) - allowed_fields)
         if unknown_fields:
             return JSONResponse(
@@ -962,7 +948,7 @@ class DiffusionRouter:
             return JSONResponse(
                 status_code=400,
                 content={
-                    "error": "At least one field is required: is_dead, refresh_video_support"
+                    "error": "At least one field is required: is_dead, refresh_task_type"
                 },
             )
 
@@ -970,12 +956,12 @@ class DiffusionRouter:
             return JSONResponse(
                 status_code=400, content={"error": "is_dead must be a boolean"}
             )
-        if "refresh_video_support" in payload and not isinstance(
-            payload["refresh_video_support"], bool
+        if "refresh_task_type" in payload and not isinstance(
+            payload["refresh_task_type"], bool
         ):
             return JSONResponse(
                 status_code=400,
-                content={"error": "refresh_video_support must be a boolean"},
+                content={"error": "refresh_task_type must be a boolean"},
             )
 
         if payload.get("is_dead") is True:
@@ -983,7 +969,7 @@ class DiffusionRouter:
         elif payload.get("is_dead") is False:
             self.dead_workers.discard(worker_url)
 
-        if payload.get("refresh_video_support") is True:
+        if payload.get("refresh_task_type") is True:
             await self.refresh_worker_task_type(worker_url)
 
         return JSONResponse(

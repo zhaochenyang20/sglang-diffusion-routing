@@ -123,7 +123,7 @@ def test_put_worker_updates_flags_and_refreshes_capability():
     worker_url = "http://localhost:10090"
     worker_id = quote(worker_url, safe="")
     router.register_worker(worker_url)
-    router.worker_task_type[worker_url] = None
+    router.worker_task_type[worker_url] = "T2I"  # non-None so startup probe skips it
     refresh_calls: list[str] = []
 
     async def fake_refresh(url: str):
@@ -134,7 +134,7 @@ def test_put_worker_updates_flags_and_refreshes_capability():
     with TestClient(router.app) as client:
         response = client.put(
             f"/workers/{worker_id}",
-            json={"is_dead": True, "refresh_video_support": True},
+            json={"is_dead": True, "refresh_task_type": True},
         )
         assert response.status_code == 200
         assert refresh_calls == [worker_url]
