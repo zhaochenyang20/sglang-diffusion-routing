@@ -189,6 +189,8 @@ def test_delete_worker_removes_runtime_state():
 
 def test_v1_images_generations_routes_to_image_path():
     router = DiffusionRouter(make_router_args())
+    router.register_worker("http://image-worker:8000")
+    router.worker_task_type["http://image-worker:8000"] = "T2I"
     call_args: dict = {}
 
     async def fake_forward(request, path: str, worker_urls=None):
@@ -202,7 +204,7 @@ def test_v1_images_generations_routes_to_image_path():
         response = client.post("/v1/images/generations", json={"prompt": "cat"})
         assert response.status_code == 200
         assert call_args["path"] == "v1/images/generations"
-        assert call_args["worker_urls"] is None
+        assert call_args["worker_urls"] == ["http://image-worker:8000"]
 
 
 def test_v1_diffusion_generate_routes_to_diffusion_path():

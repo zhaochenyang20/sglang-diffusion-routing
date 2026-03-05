@@ -55,8 +55,8 @@ class TestRoundRobinBalancing:
 
 class TestLeastRequestBalancing:
     def test_prefers_less_loaded_worker(self, fake_workers):
-        slow_proc, slow_url = _start_worker("slow", latency=0.3)
-        fast_proc, fast_url = _start_worker("fast", latency=0.0)
+        slow_proc, slow_url = _start_worker("slow", latency=0.3, task_type="T2I")
+        fast_proc, fast_url = _start_worker("fast", latency=0.0, task_type="T2I")
         r_proc, rurl = _start_router(
             [slow_url, fast_url],
             routing_algorithm="least-request",
@@ -89,19 +89,26 @@ class TestLeastRequestBalancing:
 
 class TestWorkerFailure:
     def test_unreachable_worker_502(self):
-        proc, rurl = _start_router(["http://127.0.0.1:1"])
+        w_proc, w_url = _start_worker("unreachable", task_type="T2I")
+        r_proc, rurl = _start_router([w_url])
         try:
-            _wait_responding(rurl)
+            _wait_healthy(w_url)
+            _wait_healthy(rurl)
+            # Kill the worker after the router has probed and cached task_type="T2I".
+            # The router still considers it an image candidate and attempts the
+            # connection, which now fails with 502.
+            _kill_proc(w_proc)
             r = httpx.post(
                 f"{rurl}/v1/images/generations", json={"prompt": "t"}, timeout=10.0
             )
             assert r.status_code == 502
             assert "error" in r.json()
         finally:
-            _kill_proc(proc)
+            _kill_proc(w_proc)
+            _kill_proc(r_proc)
 
     def test_worker_500_forwarded(self):
-        w_proc, w_url = _start_worker("failing", fail_rate=1.0)
+        w_proc, w_url = _start_worker("failing", fail_rate=1.0, task_type="T2I")
         r_proc, rurl = _start_router([w_url])
         try:
             _wait_healthy(w_url)
@@ -118,7 +125,7 @@ class TestWorkerFailure:
             _kill_proc(r_proc)
 
     def test_worker_killed_returns_502(self, fake_workers):
-        w_proc, w_url = _start_worker("ephemeral")
+        w_proc, w_url = _start_worker("ephemeral", task_type="T2I")
         r_proc, rurl = _start_router([w_url])
         try:
             _wait_healthy(w_url)
@@ -163,21 +170,21 @@ class TestConcurrency:
             assert "data" in body
             assert len(body["data"]) == 1
 
-    def test_concurrent_mixed_endpoints(self, router_url):
+    def test_concurrent_mixed_endpoints(self, mixed_router_url):
         def gen_image():
             return httpx.post(
-                f"{router_url}/v1/images/generations",
+                f"{mixed_router_url}/v1/images/generations",
                 json={"prompt": "img", "response_format": "b64_json"},
                 timeout=15.0,
             )
 
         def gen_video():
             return httpx.post(
-                f"{router_url}/v1/videos", json={"prompt": "vid"}, timeout=15.0
+                f"{mixed_router_url}/v1/videos", json={"prompt": "vid"}, timeout=15.0
             )
 
         def check_health():
-            return httpx.get(f"{router_url}/health", timeout=5.0)
+            return httpx.get(f"{mixed_router_url}/health", timeout=5.0)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
             futs = (

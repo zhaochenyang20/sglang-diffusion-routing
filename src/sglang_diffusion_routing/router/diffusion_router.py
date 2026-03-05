@@ -566,7 +566,7 @@ class DiffusionRouter:
             and worker_url not in self.dead_workers
         ]
 
-        if self.worker_request_counts and not candidate_workers:
+        if not candidate_workers:
             return JSONResponse(
                 status_code=400,
                 content={
