@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 _METADATA_HOSTS = {"169.254.169.254", "metadata.google.internal"}
 _IMAGE_TASK_TYPES = {"T2I", "I2I", "TI2I"}
+_VIDEO_TASK_TYPES = {"T2V"}
 
 
 class DiffusionRouter:
@@ -33,9 +34,8 @@ class DiffusionRouter:
         self.worker_request_counts: dict[str, int] = {}
         # URL -> consecutive health check failures
         self.worker_failure_counts: dict[str, int] = {}
-        # URL -> whether worker supports video generation
-        # True: supports, False: image-only, None: unknown/unprobed
-        self.worker_video_support: dict[str, bool | None] = {}
+        # URL -> task_type string (e.g. "T2I", "T2V"), or None if unprobed
+        self.worker_task_type: dict[str, str | None] = {}
         # quarantined workers excluded from routing
         self.dead_workers: set[str] = set()
         # video_id -> worker URL mapping for stable query routing
@@ -337,8 +337,8 @@ class DiffusionRouter:
         if video_id:
             self.video_job_to_worker[video_id] = worker_url
 
-    async def _probe_worker_video_support(self, worker_url: str) -> bool | None:
-        """Probe /v1/models and infer if this worker supports video generation."""
+    async def _probe_worker_task_type(self, worker_url: str) -> str | None:
+        """Probe /v1/models and return the task_type string for this worker."""
         try:
             response = await self.client.get(f"{worker_url}/v1/models", timeout=5.0)
             if response.status_code == 200:
@@ -350,13 +350,14 @@ class DiffusionRouter:
                     else None
                 )
                 if isinstance(task_type, str):
-                    return task_type.upper() not in _IMAGE_TASK_TYPES
+                    return task_type
         except (httpx.RequestError, json.JSONDecodeError):
             return None
+        return None
 
-    async def refresh_worker_video_support(self, worker_url: str) -> None:
-        """Refresh cached video capability for a single worker."""
-        self.worker_video_support[worker_url] = await self._probe_worker_video_support(
+    async def refresh_worker_task_type(self, worker_url: str) -> None:
+        """Refresh cached task_type for a single worker."""
+        self.worker_task_type[worker_url] = await self._probe_worker_task_type(
             worker_url
         )
 
@@ -485,7 +486,7 @@ class DiffusionRouter:
             "active_requests": self.worker_request_counts.get(worker_url, 0),
             "is_dead": worker_url in self.dead_workers,
             "consecutive_failures": self.worker_failure_counts.get(worker_url, 0),
-            "video_support": self.worker_video_support.get(worker_url),
+            "task_type": self.worker_task_type.get(worker_url),
         }
 
     async def _extract_worker_url(
@@ -516,11 +517,14 @@ class DiffusionRouter:
         """Route image generation requests to worker /v1/images/generations."""
         candidate_workers = [
             worker_url
-            for worker_url, support in self.worker_video_support.items()
-            if support is not None and not support
+            for worker_url, task_type in self.worker_task_type.items()
+            if task_type is not None
+            and task_type.upper() in _IMAGE_TASK_TYPES
+            and worker_url in self.worker_request_counts
+            and worker_url not in self.dead_workers
         ]
 
-        if not candidate_workers:
+        if self.worker_request_counts and not candidate_workers:
             return JSONResponse(
                 status_code=400,
                 content={
@@ -528,12 +532,20 @@ class DiffusionRouter:
                 },
             )
         return await self._forward_to_worker(
-            request, "v1/images/generations", worker_urls=candidate_workers
+            request, "v1/images/generations", worker_urls=candidate_workers or None
         )
 
     async def generate_video(self, request: Request):
-        """Route video generation requests to worker /v1/videos."""
-        candidate_workers = self._video_capable_workers()
+        """Route video generation to /v1/videos."""
+        candidate_workers = [
+            worker_url
+            for worker_url, task_type in self.worker_task_type.items()
+            if task_type is not None
+            and task_type.upper() in _VIDEO_TASK_TYPES
+            and worker_url in self.worker_request_counts
+            and worker_url not in self.dead_workers
+        ]
+
         if not candidate_workers:
             return JSONResponse(
                 status_code=400,
@@ -555,8 +567,9 @@ class DiffusionRouter:
     def _video_capable_workers(self) -> list[str]:
         return [
             worker_url
-            for worker_url, support in self.worker_video_support.items()
-            if support
+            for worker_url, task_type in self.worker_task_type.items()
+            if task_type is not None
+            and task_type.upper() in _VIDEO_TASK_TYPES
             and worker_url in self.worker_request_counts
             and worker_url not in self.dead_workers
         ]
@@ -705,13 +718,14 @@ class DiffusionRouter:
         """Per-worker health and load information."""
         workers = []
         for url, count in self.worker_request_counts.items():
+            task_type = self.worker_task_type.get(url)
             workers.append(
                 {
                     "url": url,
                     "active_requests": count,
                     "is_dead": url in self.dead_workers,
                     "consecutive_failures": self.worker_failure_counts.get(url, 0),
-                    "video_support": self.worker_video_support.get(url),
+                    "task_type": task_type,
                 }
             )
         return JSONResponse(content={"workers": workers})
@@ -740,7 +754,7 @@ class DiffusionRouter:
         if normalized_url not in self.worker_request_counts:
             self.worker_request_counts[normalized_url] = 0
             self.worker_failure_counts[normalized_url] = 0
-            self.worker_video_support[normalized_url] = None
+            self.worker_task_type[normalized_url] = None
             if self.verbose:
                 print(f"[diffusion-router] Added new worker: {normalized_url}")
 
@@ -748,7 +762,7 @@ class DiffusionRouter:
         normalized_url = self.normalize_worker_url(url)
         self.worker_request_counts.pop(normalized_url, None)
         self.worker_failure_counts.pop(normalized_url, None)
-        self.worker_video_support.pop(normalized_url, None)
+        self.worker_task_type.pop(normalized_url, None)
         self.dead_workers.discard(normalized_url)
         stale_video_ids = [
             video_id
@@ -776,8 +790,7 @@ class DiffusionRouter:
             self.register_worker(normalized_url)
         except ValueError as exc:
             return JSONResponse(status_code=400, content={"error": str(exc)})
-
-        await self.refresh_worker_video_support(normalized_url)
+        await self.refresh_worker_task_type(worker_url)
         return JSONResponse(
             content={
                 "status": "success",
@@ -856,7 +869,7 @@ class DiffusionRouter:
             self.dead_workers.discard(worker_url)
 
         if payload.get("refresh_video_support") is True:
-            await self.refresh_worker_video_support(worker_url)
+            await self.refresh_worker_task_type(worker_url)
 
         return JSONResponse(
             content={
