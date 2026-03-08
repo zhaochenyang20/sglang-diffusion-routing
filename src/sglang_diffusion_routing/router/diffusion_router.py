@@ -568,7 +568,7 @@ class DiffusionRouter:
 
         if not candidate_workers:
             return JSONResponse(
-                status_code=400,
+                status_code=503,
                 content={
                     "error": "No image-capable workers available in current worker pool.",
                 },
@@ -595,7 +595,7 @@ class DiffusionRouter:
 
         if not candidate_workers:
             return JSONResponse(
-                status_code=400,
+                status_code=503,
                 content={
                     "error": "No video-capable workers available in current worker pool.",
                 },

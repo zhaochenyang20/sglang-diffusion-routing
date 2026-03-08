@@ -232,14 +232,14 @@ class TestImageGeneration:
         )
         assert r.json()["model"] == "my-custom-model"
 
-    def test_no_image_workers_400(self):
+    def test_no_image_workers_503(self):
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
             r = httpx.post(
                 f"{rurl}/v1/images/generations", json={"prompt": "t"}, timeout=5.0
             )
-            assert r.status_code == 400
+            assert r.status_code == 503
             assert "error" in r.json()
         finally:
             _kill_proc(proc)
@@ -266,12 +266,12 @@ class TestVideoGeneration:
         )
         assert r.json()["data"][0]["revised_prompt"] == prompt
 
-    def test_no_video_workers_400(self):
+    def test_no_video_workers_503(self):
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
             r = httpx.post(f"{rurl}/v1/videos", json={"prompt": "t"}, timeout=5.0)
-            assert r.status_code == 400
+            assert r.status_code == 503
             assert "video-capable" in r.json()["error"]
         finally:
             _kill_proc(proc)
