@@ -51,7 +51,7 @@ sglang-d-router --port 30081 --launcher-config examples/local_launcher.yaml
 ```yaml
 launcher:
   backend: local
-  model: Qwen/Qwen-Image
+  model: stabilityai/stable-diffusion-3-medium-diffusers
   num_workers: 8
   num_gpus_per_worker: 1
   worker_base_port: 10090
@@ -69,14 +69,14 @@ launcher:
 
 # worker 1
 CUDA_VISIBLE_DEVICES=0 sglang serve \
-    --model-path Qwen/Qwen-Image \
+    --model-path stabilityai/stable-diffusion-3-medium-diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30000
 
 # worker 2
 CUDA_VISIBLE_DEVICES=1 sglang serve \
-    --model-path Qwen/Qwen-Image \
+    --model-path stabilityai/stable-diffusion-3-medium-diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30002
@@ -117,7 +117,7 @@ ROUTER = "http://localhost:30081"
 resp = requests.get(f"{ROUTER}/health")
 print(resp.json())
 
-# Register a worker
+# Register a worker (only needed for manual launch; co-launch handles this)
 resp = requests.post(f"{ROUTER}/workers", json={"url": "http://localhost:30000"})
 print(resp.json())
 
@@ -137,7 +137,7 @@ print(resp.json())
 
 # Image generation request (OpenAI-compatible, returns base64-encoded image)
 resp = requests.post(f"{ROUTER}/v1/images/generations", json={
-    "model": "Qwen/Qwen-Image",
+    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
     "prompt": "a cute cat",
     "num_images": 1,
     "response_format": "b64_json",
@@ -151,6 +151,7 @@ with open("output.png", "wb") as f:
     f.write(img)
 print("Saved to output.png")
 
+# FIXME:
 # Video generation request
 # Note that Stable-Diffusion-3 does not support video generation,
 # so this request will fail. Use a video-capable model instead.
@@ -166,7 +167,7 @@ if video_id:
 
 # Update weights from disk
 resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
-    "model_path": "Qwen/Qwen-Image-2512",
+    "model_path": "stabilityai/stable-diffusion-3-medium-diffusers",
 })
 print(resp.json())
 
@@ -279,6 +280,125 @@ resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
 })
 data = resp.json()
 print(f"Trajectory available: {data.get('trajectory') is not None}")
+```
+
+### Sleep / Wake Workers (GPU Memory Management)
+
+In RL pipelines, you typically alternate between rollout (inference) and training
+phases. During training, you want to free GPU memory held by the diffusion workers.
+The router provides `release_memory_occupation` (sleep) and
+`resume_memory_occupation` (wake) endpoints for this.
+
+Both operations are idempotent and broadcast to all workers. While sleeping,
+generation requests are rejected with 503. Waking also clears any dead-worker
+marks that accumulated during sleep, so workers recover cleanly.
+
+```python
+import requests
+
+ROUTER = "http://localhost:30081"
+
+# --- After rollout is done, free GPU memory for training ---
+
+# Sleep all workers (release GPU memory)
+resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
+print(resp.json())
+# Example response:
+# {"results": [{"worker_url": "http://...", "status_code": 200, "body": {...}}, ...]}
+
+# Verify workers are sleeping
+resp = requests.get(f"{ROUTER}/health")
+health = resp.json()
+print(f"Sleeping: {health['sleeping_workers']}, Healthy: {health['healthy_workers']}")
+
+# Generation requests are rejected while workers sleep
+resp = requests.post(f"{ROUTER}/v1/images/generations", json={
+    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
+    "prompt": "a cute cat",
+})
+print(resp.status_code)  # 503
+
+# Calling sleep again is safe (idempotent)
+resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
+print(resp.json())
+# {"message": "All workers are already sleeping", "sleeping_workers": N}
+
+# --- Training phase happens here ---
+
+# --- Wake workers back up before next rollout ---
+
+# Wake all sleeping workers (resume GPU memory)
+resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
+print(resp.json())
+# Workers are now active again; dead-worker marks cleared automatically.
+
+# Verify workers are back
+resp = requests.get(f"{ROUTER}/health")
+health = resp.json()
+print(f"Sleeping: {health['sleeping_workers']}, Healthy: {health['healthy_workers']}")
+
+# Calling wake again is safe (idempotent)
+resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
+print(resp.json())
+# {"message": "All workers are already active", "active_workers": N}
+
+# Optionally reload updated weights after training
+resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
+    "model_path": "stabilityai/stable-diffusion-3-medium-diffusers",
+})
+print(resp.json())
+
+# Now ready for next rollout
+resp = requests.post(f"{ROUTER}/v1/images/generations", json={
+    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
+    "prompt": "a cute cat",
+    "response_format": "b64_json",
+})
+print(resp.status_code)  # 200
+```
+
+### Full RL Loop Example
+
+Putting it all together — a minimal RL training loop using the router:
+
+```python
+import requests
+
+ROUTER = "http://localhost:30081"
+MODEL = "stabilityai/stable-diffusion-3-medium-diffusers"
+
+prompts = ["a cute cat", "a sunset over mountains", "a robot painting"]
+
+for epoch in range(num_epochs):
+    # 1. Wake workers
+    requests.post(f"{ROUTER}/resume_memory_occupation", json={})
+
+    # 2. (Optional) Load latest weights from training
+    if epoch > 0:
+        requests.post(f"{ROUTER}/update_weights_from_disk", json={
+            "model_path": MODEL,
+        })
+
+    # 3. Rollout — generate images with trajectory data for RL
+    trajectories = []
+    for prompt in prompts:
+        resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
+            "prompt": prompt,
+            "width": 512,
+            "height": 512,
+            "num_inference_steps": 28,
+            "guidance_scale": 7.0,
+            "get_latents": True,
+            "get_log_probs": True,
+        })
+        trajectories.append(resp.json())
+
+    # 4. Sleep workers — free GPU memory for training
+    requests.post(f"{ROUTER}/release_memory_occupation", json={})
+
+    # 5. Train on collected trajectories
+    # train(trajectories)
+    pass
 ```
 
 
