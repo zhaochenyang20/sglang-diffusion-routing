@@ -171,13 +171,9 @@ resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
 })
 print(resp.json())
 
-# sleep and wake up
-resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
-print(resp.json())
-
-
-resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
-print(resp.json())
+# Sleep / wake — see docs/sleep_wake.md for full examples
+resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})  # sleep
+resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})   # wake
 ```
 
 ### Native Diffusion Generate Endpoint (with Trajectory & Log-Prob)
@@ -284,122 +280,11 @@ print(f"Trajectory available: {data.get('trajectory') is not None}")
 
 ### Sleep / Wake Workers (GPU Memory Management)
 
-In RL pipelines, you typically alternate between rollout (inference) and training
-phases. During training, you want to free GPU memory held by the diffusion workers.
-The router provides `release_memory_occupation` (sleep) and
-`resume_memory_occupation` (wake) endpoints for this.
+See [docs/sleep_wake.md](docs/sleep_wake.md) for sleep/wake API usage and examples.
 
-Both operations are idempotent and broadcast to all workers. While sleeping,
-generation requests are rejected with 503. Waking also clears any dead-worker
-marks that accumulated during sleep, so workers recover cleanly.
+### RL Training Integration
 
-```python
-import requests
-
-ROUTER = "http://localhost:30081"
-
-# --- After rollout is done, free GPU memory for training ---
-
-# Sleep all workers (release GPU memory)
-resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
-print(resp.json())
-# Example response:
-# {"results": [{"worker_url": "http://...", "status_code": 200, "body": {...}}, ...]}
-
-# Verify workers are sleeping
-resp = requests.get(f"{ROUTER}/health")
-health = resp.json()
-print(f"Sleeping: {health['sleeping_workers']}, Healthy: {health['healthy_workers']}")
-
-# Generation requests are rejected while workers sleep
-resp = requests.post(f"{ROUTER}/v1/images/generations", json={
-    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
-    "prompt": "a cute cat",
-})
-print(resp.status_code)  # 503
-
-# Calling sleep again is safe (idempotent)
-resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
-print(resp.json())
-# {"message": "All workers are already sleeping", "sleeping_workers": N}
-
-# --- Training phase happens here ---
-
-# --- Wake workers back up before next rollout ---
-
-# Wake all sleeping workers (resume GPU memory)
-resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
-print(resp.json())
-# Workers are now active again; dead-worker marks cleared automatically.
-
-# Verify workers are back
-resp = requests.get(f"{ROUTER}/health")
-health = resp.json()
-print(f"Sleeping: {health['sleeping_workers']}, Healthy: {health['healthy_workers']}")
-
-# Calling wake again is safe (idempotent)
-resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
-print(resp.json())
-# {"message": "All workers are already active", "active_workers": N}
-
-# Optionally reload updated weights after training
-resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
-    "model_path": "stabilityai/stable-diffusion-3-medium-diffusers",
-})
-print(resp.json())
-
-# Now ready for next rollout
-resp = requests.post(f"{ROUTER}/v1/images/generations", json={
-    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
-    "prompt": "a cute cat",
-    "response_format": "b64_json",
-})
-print(resp.status_code)  # 200
-```
-
-### Full RL Loop Example
-
-Putting it all together — a minimal RL training loop using the router:
-
-```python
-import requests
-
-ROUTER = "http://localhost:30081"
-MODEL = "stabilityai/stable-diffusion-3-medium-diffusers"
-
-prompts = ["a cute cat", "a sunset over mountains", "a robot painting"]
-
-for epoch in range(num_epochs):
-    # 1. Wake workers
-    requests.post(f"{ROUTER}/resume_memory_occupation", json={})
-
-    # 2. (Optional) Load latest weights from training
-    if epoch > 0:
-        requests.post(f"{ROUTER}/update_weights_from_disk", json={
-            "model_path": MODEL,
-        })
-
-    # 3. Rollout — generate images with trajectory data for RL
-    trajectories = []
-    for prompt in prompts:
-        resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
-            "prompt": prompt,
-            "width": 512,
-            "height": 512,
-            "num_inference_steps": 28,
-            "guidance_scale": 7.0,
-            "get_latents": True,
-            "get_log_probs": True,
-        })
-        trajectories.append(resp.json())
-
-    # 4. Sleep workers — free GPU memory for training
-    requests.post(f"{ROUTER}/release_memory_occupation", json={})
-
-    # 5. Train on collected trajectories
-    # train(trajectories)
-    pass
-```
+See [docs/rl_training.md](docs/rl_training.md) for a full RL training loop example (wake → refit → rollout → sleep → train).
 
 
 ## Router API
