@@ -134,7 +134,7 @@ class DiffusionRouter:
                 "[diffusion-router] Worker %s health check failed: %s", url, exc
             )
         return url, False
-    
+
     async def _check_worker_health_staggered(self, url: str) -> tuple[str, bool]:
         """Run health check while respecting the concurrency semaphore."""
         async with self._health_check_semaphore:

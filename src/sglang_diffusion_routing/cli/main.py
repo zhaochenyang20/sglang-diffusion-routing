@@ -162,13 +162,13 @@ def _add_router_args(parser: argparse.ArgumentParser) -> None:
         "--health-check-concurrency",
         type=int,
         default=None,
-        help="Max concurrent health check pings to workers."
+        help="Max concurrent health check pings to workers.",
     )
     parser.add_argument(
         "--health-check-jitter",
         type=float,
         default=0.0,
-        help="Jitter factor for health check intervals"
+        help="Jitter factor for health check intervals",
     )
 
 

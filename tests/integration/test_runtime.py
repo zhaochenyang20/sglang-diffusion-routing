@@ -189,6 +189,7 @@ class TestConcurrency:
 
         assert all(r.status_code == 200 for r in results)
 
+
 class TestHealthCheckLoop:
     def test_health_check_staggering_limits_bursts(self):
         w_procs = []
@@ -201,23 +202,23 @@ class TestHealthCheckLoop:
 
         r_proc, rurl = _start_router(
             w_urls,
-            health_check_concurrency=1, # Use 1 to force "batching"
+            health_check_concurrency=1,  # Use 1 to force "batching"
             health_check_jitter=0.0,
-            health_check_interval=1, 
+            health_check_interval=1,
         )
 
         try:
             _wait_responding(rurl)
-            
+
             # Kill all workers at once
             for p in w_procs:
                 _kill_proc(p)
 
-            # We poll frequently (0.01s) to catch the moment where only partial state of 
+            # We poll frequently (0.01s) to catch the moment where only partial state of
             # managed workers is read.
             saw_partial_state = False
             deadline = time.monotonic() + 10.0
-            
+
             while time.monotonic() < deadline:
                 r = httpx.get(f"{rurl}/workers", timeout=5.0)
                 workers = r.json().get("workers", [])
@@ -225,8 +226,8 @@ class TestHealthCheckLoop:
 
                 # check if the staggering is working.
                 if 0 < dead_count < 8:
-                    saw_partial_state = True 
-                
+                    saw_partial_state = True
+
                 if dead_count == 8:
                     break
                 time.sleep(0.01)
