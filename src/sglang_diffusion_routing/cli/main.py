@@ -158,6 +158,18 @@ def _add_router_args(parser: argparse.ArgumentParser) -> None:
         dest="launcher_config",
         help="YAML config for launching router managed workers (see examples/local_launcher.yaml).",
     )
+    parser.add_argument(
+        "--health-check-concurrency",
+        type=int,
+        default=None,
+        help="Max concurrent health check pings to workers."
+    )
+    parser.add_argument(
+        "--health-check-jitter",
+        type=float,
+        default=0.0,
+        help="Jitter factor for health check intervals"
+    )
 
 
 def _handle_router(args: argparse.Namespace) -> int:
