@@ -51,7 +51,7 @@ sglang-d-router --port 30081 --launcher-config examples/local_launcher.yaml
 ```yaml
 launcher:
   backend: local
-  model: Qwen/Qwen-Image
+  model: stabilityai/stable-diffusion-3-medium-diffusers
   num_workers: 8
   num_gpus_per_worker: 1
   worker_base_port: 10090
@@ -69,14 +69,14 @@ launcher:
 
 # worker 1
 CUDA_VISIBLE_DEVICES=0 sglang serve \
-    --model-path Qwen/Qwen-Image \
+    --model-path stabilityai/stable-diffusion-3-medium-diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30000
 
 # worker 2
 CUDA_VISIBLE_DEVICES=1 sglang serve \
-    --model-path Qwen/Qwen-Image \
+    --model-path stabilityai/stable-diffusion-3-medium-diffusers \
     --num-gpus 1 \
     --host 127.0.0.1 \
     --port 30002
@@ -117,7 +117,7 @@ ROUTER = "http://localhost:30081"
 resp = requests.get(f"{ROUTER}/health")
 print(resp.json())
 
-# Register a worker
+# Register a worker (only needed for manual launch; co-launch handles this)
 resp = requests.post(f"{ROUTER}/workers", json={"url": "http://localhost:30000"})
 print(resp.json())
 
@@ -137,7 +137,7 @@ print(resp.json())
 
 # Image generation request (OpenAI-compatible, returns base64-encoded image)
 resp = requests.post(f"{ROUTER}/v1/images/generations", json={
-    "model": "Qwen/Qwen-Image",
+    "model": "stabilityai/stable-diffusion-3-medium-diffusers",
     "prompt": "a cute cat",
     "num_images": 1,
     "response_format": "b64_json",
@@ -151,6 +151,7 @@ with open("output.png", "wb") as f:
     f.write(img)
 print("Saved to output.png")
 
+# FIXME:
 # Video generation request
 # Note that Stable-Diffusion-3 does not support video generation,
 # so this request will fail. Use a video-capable model instead.
@@ -166,17 +167,13 @@ if video_id:
 
 # Update weights from disk
 resp = requests.post(f"{ROUTER}/update_weights_from_disk", json={
-    "model_path": "Qwen/Qwen-Image-2512",
+    "model_path": "stabilityai/stable-diffusion-3-medium-diffusers",
 })
 print(resp.json())
 
-# sleep and wake up
-resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})
-print(resp.json())
-
-
-resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})
-print(resp.json())
+# Sleep / wake — see docs/sleep_wake.md for full examples
+resp = requests.post(f"{ROUTER}/release_memory_occupation", json={})  # sleep
+resp = requests.post(f"{ROUTER}/resume_memory_occupation", json={})   # wake
 ```
 
 ### Native Diffusion Generate Endpoint (with Trajectory & Log-Prob)
@@ -280,6 +277,14 @@ resp = requests.post(f"{ROUTER}/v1/diffusion/generate", json={
 data = resp.json()
 print(f"Trajectory available: {data.get('trajectory') is not None}")
 ```
+
+### Sleep / Wake Workers (GPU Memory Management)
+
+See [docs/sleep_wake.md](docs/sleep_wake.md) for sleep/wake API usage and examples.
+
+### RL Training Integration
+
+See [docs/rl_training.md](docs/rl_training.md) for a full RL training loop example (wake → refit → rollout → sleep → train).
 
 
 ## Router API

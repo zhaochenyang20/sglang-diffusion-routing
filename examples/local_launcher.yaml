@@ -1,5 +1,5 @@
 launcher:
-  model: Qwen/Qwen-Image
+  model: stabilityai/stable-diffusion-3-medium-diffusers
 
   num_workers: 8
   num_gpus_per_worker: 1
