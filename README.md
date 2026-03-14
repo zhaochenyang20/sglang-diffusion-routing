@@ -27,6 +27,10 @@ cd sglang-diffusion-routing
 # If cloned without --recursive, initialize the sglang submodule:
 # git submodule update --init --recursive
 
+# Create and activate a virtual environment
+uv venv .venv
+source .venv/bin/activate
+
 # Install the router package
 uv pip install .
 
