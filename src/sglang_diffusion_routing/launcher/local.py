@@ -21,6 +21,7 @@ from sglang_diffusion_routing.launcher.backend import (
 from sglang_diffusion_routing.launcher.utils import (
     build_gpu_assignments,
     infer_connect_host,
+    is_port_available,
     reserve_available_port,
     terminate_all,
     wait_for_health,
@@ -206,8 +207,10 @@ def _launch_single_worker(
     log_prefix: str,
 ) -> LaunchedWorker:
     """Launch a single SGLang Diffusion worker subprocess."""
+    # sglang workers implicitly bind port+1 for a ZMQ broker, so we must
+    # ensure both port and port+1 are free before assigning.
     preferred_worker_port = worker_base_port + index * 2
-    worker_port = reserve_available_port(worker_host, preferred_worker_port, used_ports)
+    worker_port = _reserve_worker_port(worker_host, preferred_worker_port, used_ports)
 
     master_port = reserve_available_port(
         "127.0.0.1",
@@ -256,3 +259,24 @@ def _launch_single_worker(
         start_new_session=True,
     )
     return LaunchedWorker(url=worker_url, process=proc)
+
+
+def _reserve_worker_port(host: str, preferred_port: int, used_ports: set[int]) -> int:
+    """Find a port where both port and port+1 are available.
+
+    sglang diffusion workers implicitly bind port+1 for a ZMQ broker,
+    so we need to ensure the adjacent port is also free.  Both ports
+    are added to *used_ports* to prevent other workers from claiming them.
+    """
+    for port in range(preferred_port, 65535):
+        if port in used_ports or (port + 1) in used_ports:
+            continue
+        if is_port_available(host, port) and is_port_available(host, port + 1):
+            used_ports.add(port)
+            used_ports.add(port + 1)
+            return port
+
+    raise RuntimeError(
+        f"Unable to reserve a worker port (with adjacent ZMQ port) "
+        f"for host {host}. Preferred start={preferred_port}."
+    )
