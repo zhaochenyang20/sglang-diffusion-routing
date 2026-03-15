@@ -25,9 +25,9 @@ def test_post_workers_normalizes_and_deduplicates():
     router = DiffusionRouter(make_router_args())
 
     async def fake_refresh(worker_url: str):
-        router.worker_video_support[worker_url] = False
+        router.worker_task_type[worker_url] = "T2I"
 
-    router.refresh_worker_video_support = fake_refresh  # type: ignore[assignment]
+    router.refresh_worker_task_type = fake_refresh  # type: ignore[assignment]
     with TestClient(router.app) as client:
         first = client.post("/workers", params={"url": "http://LOCALHOST:10090/"})
         assert first.status_code == 200
@@ -44,7 +44,7 @@ def test_post_workers_normalizes_and_deduplicates():
         assert workers[0]["active_requests"] == 0
         assert workers[0]["is_dead"] is False
         assert workers[0]["consecutive_failures"] == 0
-        assert workers[0]["video_support"] is False
+        assert workers[0]["task_type"] == "T2I"
 
 
 def test_post_workers_rejects_blocked_metadata_host():
@@ -55,21 +55,95 @@ def test_post_workers_rejects_blocked_metadata_host():
         assert "blocked" in response.json()["error"]
 
 
+def test_generate_routes_only_to_image_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://image-worker:8000")
+    router.register_worker("http://video-worker:8000")
+    router.worker_task_type["http://image-worker:8000"] = "T2I"
+    router.worker_task_type["http://video-worker:8000"] = "T2V"
+
+    captured = {}
+
+    async def fake_forward(request, path, worker_urls=None):
+        captured["worker_urls"] = worker_urls
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(content={"ok": True})
+
+    router._forward_to_worker = fake_forward  # type: ignore[assignment]
+    with TestClient(router.app) as client:
+        client.post("/v1/images/generations", json={"prompt": "a cat"})
+
+    assert captured["worker_urls"] == ["http://image-worker:8000"]
+
+
+def test_generate_returns_400_when_only_unknown_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://unknown-worker:8000")
+    router.worker_task_type["http://unknown-worker:8000"] = None
+
+    with TestClient(router.app) as client:
+        response = client.post("/v1/images/generations", json={"prompt": "a cat"})
+
+    assert response.status_code == 400
+    assert "image-capable" in response.json()["error"]
+
+
+def test_generate_returns_400_when_only_video_workers():
+    router = DiffusionRouter(make_router_args())
+    router.register_worker("http://video-worker:8000")
+    router.worker_task_type["http://video-worker:8000"] = "T2V"
+
+    with TestClient(router.app) as client:
+        response = client.post("/v1/images/generations", json={"prompt": "a cat"})
+
+    assert response.status_code == 400
+    assert "image-capable" in response.json()["error"]
+
+
 def test_get_worker_by_id_success_and_not_found():
     router = DiffusionRouter(make_router_args())
     worker_url = "http://localhost:10090"
     worker_id = quote(worker_url, safe="")
     router.register_worker(worker_url)
-    router.worker_video_support[worker_url] = True
+    router.worker_task_type[worker_url] = "T2V"
 
     with TestClient(router.app) as client:
         found = client.get(f"/workers/{worker_id}")
         assert found.status_code == 200
         assert found.json()["worker"]["url"] == worker_url
-        assert found.json()["worker"]["video_support"] is True
+        assert found.json()["worker"]["task_type"] == "T2V"
 
         missing = client.get(f"/workers/{quote('http://localhost:19999', safe='')}")
         assert missing.status_code == 404
+
+
+def test_put_worker_updates_flags_and_refreshes_capability():
+    router = DiffusionRouter(make_router_args())
+    worker_url = "http://localhost:10090"
+    worker_id = quote(worker_url, safe="")
+    router.register_worker(worker_url)
+    router.worker_task_type[worker_url] = "T2I"  # non-None so startup probe skips it
+    refresh_calls: list[str] = []
+
+    async def fake_refresh(url: str):
+        refresh_calls.append(url)
+        router.worker_task_type[url] = "T2V"
+
+    router.refresh_worker_task_type = fake_refresh  # type: ignore[assignment]
+    with TestClient(router.app) as client:
+        response = client.put(
+            f"/workers/{worker_id}",
+            json={"is_dead": True, "refresh_task_type": True},
+        )
+        assert response.status_code == 200
+        assert refresh_calls == [worker_url]
+        assert response.json()["worker"]["is_dead"] is True
+        assert response.json()["worker"]["task_type"] == "T2V"
+
+        revive = client.put(f"/workers/{worker_id}", json={"is_dead": False})
+        assert revive.status_code == 200
+        assert revive.json()["worker"]["is_dead"] is False
 
 
 def test_put_worker_rejects_invalid_payload():
@@ -98,7 +172,7 @@ def test_delete_worker_removes_runtime_state():
     worker_id = quote(worker_url, safe="")
     router.register_worker(worker_url)
     router.worker_failure_counts[worker_url] = 2
-    router.worker_video_support[worker_url] = True
+    router.worker_task_type[worker_url] = "T2V"
     router.dead_workers.add(worker_url)
 
     with TestClient(router.app) as client:
@@ -106,7 +180,7 @@ def test_delete_worker_removes_runtime_state():
         assert deleted.status_code == 200
         assert worker_url not in router.worker_request_counts
         assert worker_url not in router.worker_failure_counts
-        assert worker_url not in router.worker_video_support
+        assert worker_url not in router.worker_task_type
         assert worker_url not in router.dead_workers
 
         missing = client.delete(f"/workers/{worker_id}")
@@ -115,6 +189,8 @@ def test_delete_worker_removes_runtime_state():
 
 def test_v1_images_generations_routes_to_image_path():
     router = DiffusionRouter(make_router_args())
+    router.register_worker("http://image-worker:8000")
+    router.worker_task_type["http://image-worker:8000"] = "T2I"
     call_args: dict = {}
 
     async def fake_forward(request, path: str, worker_urls=None):
@@ -128,7 +204,7 @@ def test_v1_images_generations_routes_to_image_path():
         response = client.post("/v1/images/generations", json={"prompt": "cat"})
         assert response.status_code == 200
         assert call_args["path"] == "v1/images/generations"
-        assert call_args["worker_urls"] is None
+        assert call_args["worker_urls"] == ["http://image-worker:8000"]
 
 
 def test_v1_diffusion_generate_routes_to_diffusion_path():
@@ -155,7 +231,7 @@ def test_v1_diffusion_generate_routes_to_diffusion_path():
 def test_v1_videos_requires_video_capable_workers():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")
-    router.worker_video_support["http://localhost:10090"] = False
+    router.worker_task_type["http://localhost:10090"] = "T2I"
 
     with TestClient(router.app) as client:
         response = client.post("/v1/videos", json={"prompt": "river"})
@@ -167,8 +243,8 @@ def test_v1_videos_routes_only_to_video_capable_workers_and_caches_video_id():
     router = DiffusionRouter(make_router_args())
     router.register_worker("http://localhost:10090")
     router.register_worker("http://localhost:10091")
-    router.worker_video_support["http://localhost:10090"] = True
-    router.worker_video_support["http://localhost:10091"] = False
+    router.worker_task_type["http://localhost:10090"] = "T2V"
+    router.worker_task_type["http://localhost:10091"] = "T2I"
     call_args: dict = {}
 
     async def fake_forward_selected_worker(request, path: str, worker_url: str):

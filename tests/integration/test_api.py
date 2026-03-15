@@ -135,7 +135,7 @@ class TestWorkerRegistration:
 
     def test_dynamic_worker_receives_traffic(self, fake_workers):
         """Add a worker dynamically and verify it actually receives requests."""
-        w_proc, w_url = _start_worker("dynamic")
+        w_proc, w_url = _start_worker("dynamic", task_type="T2I")
         r_proc, rurl = _start_router([])
         try:
             _wait_healthy(w_url)
@@ -232,7 +232,7 @@ class TestImageGeneration:
         )
         assert r.json()["model"] == "my-custom-model"
 
-    def test_no_workers_503(self):
+    def test_no_image_workers_503(self):
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
@@ -246,9 +246,9 @@ class TestImageGeneration:
 
 
 class TestVideoGeneration:
-    def test_generate_video(self, router_url):
+    def test_generate_video(self, mixed_router_url):
         r = httpx.post(
-            f"{router_url}/v1/videos",
+            f"{mixed_router_url}/v1/videos",
             json={"model": "vid-model", "prompt": "river"},
             timeout=10.0,
         )
@@ -257,21 +257,21 @@ class TestVideoGeneration:
         assert "url" in body["data"][0]
         assert "created" in body
 
-    def test_video_prompt_preserved(self, router_url):
+    def test_video_prompt_preserved(self, mixed_router_url):
         prompt = "a flowing river in autumn"
         r = httpx.post(
-            f"{router_url}/v1/videos",
+            f"{mixed_router_url}/v1/videos",
             json={"model": "vid", "prompt": prompt},
             timeout=10.0,
         )
         assert r.json()["data"][0]["revised_prompt"] == prompt
 
-    def test_no_workers_503(self):
+    def test_no_video_workers_503(self):
         proc, rurl = _start_router([])
         try:
             _wait_responding(rurl)
             r = httpx.post(f"{rurl}/v1/videos", json={"prompt": "t"}, timeout=5.0)
-            assert r.status_code == 400
+            assert r.status_code == 503
             assert "video-capable" in r.json()["error"]
         finally:
             _kill_proc(proc)

@@ -143,9 +143,25 @@ class FakeWorker:
 def fake_workers():
     workers, procs = [], []
     for i in range(2):
-        proc, url = _start_worker(f"worker-{i}")
+        proc, url = _start_worker(f"worker-{i}", task_type="T2I")
         procs.append(proc)
         workers.append(FakeWorker(proc, url, f"worker-{i}"))
+    for w in workers:
+        _wait_healthy(w.url)
+    yield workers
+    for p in procs:
+        _kill_proc(p)
+
+
+@pytest.fixture(scope="module")
+def fake_mixed_workers():
+    """One T2I worker and one T2V worker."""
+    configs = [("mixed-t2i", "T2I"), ("mixed-t2v", "T2V")]
+    workers, procs = [], []
+    for worker_id, task_type in configs:
+        proc, url = _start_worker(worker_id, task_type=task_type)
+        procs.append(proc)
+        workers.append(FakeWorker(proc, url, worker_id))
     for w in workers:
         _wait_healthy(w.url)
     yield workers
@@ -157,6 +173,21 @@ def fake_workers():
 def router_url(fake_workers):
     proc, url = _start_router(
         [w.url for w in fake_workers], routing_algorithm="round-robin"
+    )
+    try:
+        _wait_healthy(url)
+    except TimeoutError:
+        _kill_proc(proc)
+        raise
+    yield url
+    _kill_proc(proc)
+
+
+@pytest.fixture(scope="module")
+def mixed_router_url(fake_mixed_workers):
+    """Router with one T2I and one T2V worker."""
+    proc, url = _start_router(
+        [w.url for w in fake_mixed_workers], routing_algorithm="round-robin"
     )
     try:
         _wait_healthy(url)
