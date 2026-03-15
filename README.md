@@ -15,6 +15,7 @@ A lightweight router for SGLang diffusion workers used in RL systems. It provide
   - [Model Discovery and Health Checks](#model-discovery-and-health-checks)
   - [Worker Management APIs](#worker-management-apis)
   - [RL Related API](#rl-related-api)
+- [Documentation](#documentation)
 - [Acknowledgment](#acknowledgment)
 
 
@@ -340,6 +341,11 @@ Video query routing is stable by `video_id`: router caches `video_id -> worker` 
 | `POST` | `/resume_memory_occupation` | Wake all sleeping workers (resume GPU memory) |
 
 Both sleep and wake are idempotent. While sleeping, generation requests are rejected (503 from router). A typical RL loop: wake → refit weights → rollout → sleep → train → repeat.
+
+## Documentation
+
+- [Launcher](docs/launcher.md) — auto-spawn and manage workers via YAML config
+- [Update Weights](docs/update_weights.md) — broadcast weight reload across workers for RL refit
 
 ## Acknowledgment
 
