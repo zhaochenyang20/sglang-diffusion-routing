@@ -48,6 +48,12 @@ class DiffusionRouter:
         self._rr_index = 0
 
         max_connections = getattr(args, "max_connections", 100)
+
+        self.health_check_concurrency = getattr(args, "health_check_concurrency", None)
+        if self.health_check_concurrency is None:
+            self.health_check_concurrency = max_connections
+
+        self._health_check_semaphore = asyncio.Semaphore(self.health_check_concurrency)
         timeout = getattr(args, "timeout", 120.0)
         if timeout is None:
             timeout = 120.0
@@ -129,14 +135,21 @@ class DiffusionRouter:
             )
         return url, False
 
+    async def _check_worker_health_staggered(self, url: str) -> tuple[str, bool]:
+        """Run health check while respecting the concurrency semaphore."""
+        async with self._health_check_semaphore:
+            return await self._check_worker_health(url)
+
     async def _health_check_loop(self) -> None:
         """Background loop to monitor worker health and quarantine failing workers."""
         interval = getattr(self.args, "health_check_interval", 10)
         threshold = getattr(self.args, "health_check_failure_threshold", 3)
+        jitter = getattr(self.args, "health_check_jitter", 0.0)
 
         while True:
             try:
-                await asyncio.sleep(interval)
+                actual_interval = interval * random.uniform(1 - jitter, 1 + jitter)
+                await asyncio.sleep(actual_interval)
 
                 urls = [
                     u for u in self.worker_request_counts if u not in self.dead_workers
@@ -145,7 +158,7 @@ class DiffusionRouter:
                     continue
 
                 results = await asyncio.gather(
-                    *(self._check_worker_health(url) for url in urls)
+                    *(self._check_worker_health_staggered(url) for url in urls)
                 )
                 for url, is_healthy in results:
                     if not is_healthy:
